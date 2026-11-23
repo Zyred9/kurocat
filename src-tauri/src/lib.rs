@@ -425,15 +425,20 @@ fn get_cursor_pos(_scale_factor: f64) -> Option<(i32, i32)> {
 }
 
 fn is_over_interactive_silhouette(rx: f64, ry: f64, is_108: bool) -> (bool, bool) {
+    // The relocated mouse is interactive and has no petting response.
+    if is_108 && rx >= 0.26 && rx <= 0.39 && ry >= 0.515 && ry <= 0.672 {
+        return (true, false);
+    }
+
     // Cat body/head oval centered around (0.48, 0.49) for 65% or (0.51, 0.48) for 108-key
     let (cat_cx, cat_rx) = if is_108 { (0.51, 0.21) } else { (0.48, 0.25) };
     let dx_cat = (rx - cat_cx) / cat_rx;
     let dy_cat = (ry - 0.49) / 0.27;
     let over_cat = (dx_cat * dx_cat + dy_cat * dy_cat) <= 1.0;
 
-    // Keyboard & mouse lower area
+    // Keyboard area, including the mouse for the compact layout.
     let over_desk = if is_108 {
-        rx >= 0.04 && rx <= 0.94 && ry >= 0.65 && ry <= 0.94
+        rx >= 0.125 && rx <= 0.92 && ry >= 0.65 && ry <= 0.94
     } else {
         rx >= 0.06 && rx <= 0.92 && ry >= 0.65 && ry <= 0.91
     };
