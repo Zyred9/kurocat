@@ -1,6 +1,7 @@
 import {
   KEYBOARD_KEYS_65,
   KEYBOARD_KEYS_108,
+  TOTAL_UNITS,
   getKeyboardLayout,
   type KeySpec,
   type KeyboardLayoutId,
@@ -13,6 +14,13 @@ import { DaFeiYuRenderer, type DaFeiYuLayout } from './dafeiyuRenderer';
 
 export const LOGICAL_W = 420;
 export const LOGICAL_H = 440;
+const TYPING_WINDOW_MS = 950;
+const TYPING_EMOTION_KEY_COUNT = 8;
+const TYPING_STREAK_MS = 4000;
+const TYPING_STREAK_MAX_GAP_MS = 650;
+const TYPING_EMOTION_HOLD_MS = 1200;
+const TYPING_EMOTION_FADE_MS = 350;
+
 export type CatBreed = 'black' | 'ragdoll' | 'dafeiyu';
 export type KeyboardOrientation = 'cat' | 'viewer';
 
@@ -109,6 +117,7 @@ export class KuroCatEngine {
     this.dafeiyu.onPrivacyModeChanged(active);
     if (active) {
       this.bubbles.length = 0;
+      this.clearTypingEmotion();
       for (const anim of this.keyAnims.values()) {
         anim.pressed = false;
         anim.pressAmount = 0;
@@ -139,13 +148,13 @@ export class KuroCatEngine {
       this.catCenterX = 278;
       this.catTopY = 66;
       this.catBaseY = 292;
-      this.kbCenterX = 290;
+      this.kbCenterX = isBigFish ? 290 : this.catCenterX;
       this.kbCenterY = 356;
       this.kbWidth = 398;
       this.kbHeight = 96;
       this.kbTiltRad = (2.4 * Math.PI) / 180;
-      this.mouseBaseX = isBigFish ? 54 : 46;
-      this.mouseBaseY = isBigFish ? 332 : 342;
+      this.mouseBaseX = isBigFish ? 54 : 176;
+      this.mouseBaseY = isBigFish ? 332 : 270;
     } else {
       this.logicalW = 420;
       this.logicalH = 440;
@@ -163,6 +172,7 @@ export class KuroCatEngine {
   }
 
   public setCatAppearance(breedId: string, skin?: CatSkinConfig | null): void {
+    const wasBigFish = this.catBreed === 'dafeiyu';
     if (breedId === 'dafeiyu') {
       this.catBreed = 'dafeiyu';
       this.customSkin = null;
@@ -176,6 +186,7 @@ export class KuroCatEngine {
       this.catBreed = 'black';
       this.customSkin = null;
     }
+    if (wasBigFish !== (this.catBreed === 'dafeiyu')) this.clearTypingEmotion();
     this.syncLayoutPositions();
   }
 
@@ -297,7 +308,11 @@ export class KuroCatEngine {
   private squintAmount = 0;
   private earTwitchLeft = 0;
   private earTwitchRight = 0;
-  private recentKeyTimes: number[] = [];
+  private recentKeyTimes: { at: number; demo: boolean }[] = [];
+  private typingStreakStartedAt = 0;
+  private typingEmotionStartedAt: number | null = null;
+  private typingEmotionLastKeyAt = Number.NEGATIVE_INFINITY;
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private typingEnergy = 0;
   private lastAnyKeyAt = -10000;
 
@@ -397,7 +412,7 @@ export class KuroCatEngine {
     const u = Math.max(0, Math.min(1, 1 - t)); // 0 at hips, 1 at head
     const shearCurve = u * u * (3 - 2 * u); // smoothstep from hips up to head!
     // Measured mouse-lean shift (-46px at head) + lively typing left-right body/head sway (+-25px)!
-    const leanAmp = this.keyboardLayout === '108' ? 76 : 46;
+    const leanAmp = this.keyboardLayout === '108' ? 38 : 46;
     const leanX = (this.spineLean * leanAmp + this.typingSway * 25 + this.strikeRock * 10) * shearCurve;
     const swayDipY = Math.abs(this.typingSway) * 4.0 * shearCurve;
     const hunchY = (this.typingHunch * 13 + this.bodyBob * 4.8 + breath) * shearCurve + swayDipY;
@@ -430,7 +445,7 @@ export class KuroCatEngine {
 
   // ---- Input event handlers ----
 
-  public onKeyDown(vk: number, repeat: boolean): void {
+  public onKeyDown(vk: number, repeat: boolean, { demo = false }: { demo?: boolean } = {}): void {
     if (this.privacyMode) {
       if (!repeat) this.onPrivacyTyping();
       return;
@@ -449,8 +464,9 @@ export class KuroCatEngine {
     if (repeat) return;
 
     this.lastAnyKeyAt = now;
-    this.recentKeyTimes.push(now);
+    this.recentKeyTimes.push({ at: now, demo });
     if (this.recentKeyTimes.length > 26) this.recentKeyTimes.shift();
+    if (!demo && this.catBreed !== 'dafeiyu') this.trackTypingEmotion(now);
 
     this.bodyBob = Math.min(1.15, this.bodyBob + 0.65);
     this.kbBounce = Math.min(1, this.kbBounce + 0.45);
@@ -485,12 +501,9 @@ export class KuroCatEngine {
     let chosen: PawState;
 
     const activelyMousing = this.mouseLeftDown || this.mouseRightDown || now - this.lastMouseMoveAt < 320;
-    const splitCol =
-      this.keyboardLayout === '108'
-        ? isCatFacing
-          ? 12.2
-          : 8.4
-        : 7.5;
+    // Split the main typing block before mirroring the full keyboard.
+    const mainKeyCenter = TOTAL_UNITS / 2;
+    const splitCol = isCatFacing ? layout.totalUnits - mainKeyCenter : mainKeyCenter;
 
     if (spec.id === 'space') {
       if (activelyMousing) {
@@ -558,6 +571,26 @@ export class KuroCatEngine {
         this.spawnBubble(label, spec.id === 'space', targetPoint.x, now);
       }
     }
+  }
+
+  private clearTypingEmotion(): void {
+    this.recentKeyTimes.length = 0;
+    this.typingEmotionStartedAt = null;
+    this.typingEmotionLastKeyAt = Number.NEGATIVE_INFINITY;
+  }
+
+  private trackTypingEmotion(now: number): void {
+    const keyGap = now - this.typingEmotionLastKeyAt;
+    this.typingEmotionLastKeyAt = now;
+    if (keyGap > TYPING_STREAK_MAX_GAP_MS) this.typingStreakStartedAt = now;
+
+    if (this.typingEmotionStartedAt !== null && keyGap < TYPING_EMOTION_HOLD_MS + TYPING_EMOTION_FADE_MS) return;
+
+    const realKeys = this.recentKeyTimes.filter((key) => !key.demo);
+    const burstStart = realKeys[realKeys.length - TYPING_EMOTION_KEY_COUNT];
+    const fastTyping = burstStart !== undefined && now - burstStart.at <= TYPING_WINDOW_MS;
+    const sustainedTyping = now - this.typingStreakStartedAt >= TYPING_STREAK_MS;
+    this.typingEmotionStartedAt = fastTyping || sustainedTyping ? now : null;
   }
 
   public onKeyUp(vk: number): void {
@@ -822,7 +855,7 @@ export class KuroCatEngine {
     this.mouseScrollFlash = Math.max(0, this.mouseScrollFlash - dt * 4.5);
     this.mouseBadges = this.mouseBadges.filter((b) => now - b.createdAt < b.lifetime);
 
-    while (this.recentKeyTimes.length > 0 && now - this.recentKeyTimes[0] > 950) {
+    while (this.recentKeyTimes.length > 0 && now - this.recentKeyTimes[0].at > TYPING_WINDOW_MS) {
       this.recentKeyTimes.shift();
     }
     const targetTypingEnergy = Math.min(1, this.recentKeyTimes.length / 7);
@@ -1097,7 +1130,48 @@ export class KuroCatEngine {
       this.drawKeyBubbles(ctx);
       this.drawMouseBadges(ctx);
     }
+    this.drawTypingEmotion(ctx, breath, purrShift);
 
+    ctx.restore();
+  }
+
+  private drawTypingEmotion(ctx: CanvasRenderingContext2D, breath: number, purrShift: number): void {
+    if (this.privacyMode || this.typingEmotionStartedAt === null) return;
+    const age = this.lastTime - this.typingEmotionStartedAt;
+    const idleTime = this.lastTime - this.typingEmotionLastKeyAt;
+    const fade = Math.max(0, (idleTime - TYPING_EMOTION_HOLD_MS) / TYPING_EMOTION_FADE_MS);
+    if (age < 0 || fade >= 1) return;
+
+    const headCenter = this.spinePoint(0.24, breath);
+    const reducedMotion = this.reducedMotion.matches;
+    const entry = Math.min(1, age / 520);
+    const pop = Math.min(1, entry * 3);
+    const bounce = Math.sin(entry * Math.PI * 4) * (1 - entry);
+    const size = reducedMotion ? 1 : 0.64 + pop * (0.36 + bounce * 0.26);
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, age / 80, 1 - fade);
+    ctx.translate(headCenter.x + purrShift, headCenter.y);
+    ctx.rotate(this.headTilt);
+    ctx.translate(18, -32);
+    if (!reducedMotion) ctx.rotate(bounce * 0.13);
+    ctx.scale(size, size);
+
+    ctx.beginPath();
+    for (let side = 0; side < 4; side++) {
+      ctx.moveTo(-11, -15);
+      ctx.quadraticCurveTo(0, -7, 11, -15);
+      ctx.quadraticCurveTo(6, -5, 0, -5);
+      ctx.quadraticCurveTo(-6, -5, -11, -15);
+      ctx.closePath();
+      ctx.rotate(Math.PI / 2);
+    }
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffe0d7';
+    ctx.stroke();
+    ctx.fillStyle = '#e83842';
+    ctx.fill();
     ctx.restore();
   }
 
