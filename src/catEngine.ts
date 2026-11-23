@@ -82,10 +82,15 @@ const BODY_SLICES: Array<{ t: number; hw: number }> = [
   { t: 1.00, hw: 46 }, // cozy bottom rest
 ];
 
+const IDLE_RENDER_AFTER_MS = 3000;
+const IDLE_RENDER_PAUSE_MS = 40;
+
 export class KuroCatEngine {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private rafId = 0;
+  private rafId: number | null = null;
+  private idleFrameTimer: number | null = null;
+  private lastActivityAt = 0;
   private lastTime = 0;
   private elapsed = 0;
 
@@ -105,6 +110,7 @@ export class KuroCatEngine {
   private lastDt = 1 / 60;
 
   public setPrivacyMode(active: boolean): void {
+    this.wakeRendering();
     this.privacyMode = active;
     this.dafeiyu.onPrivacyModeChanged(active);
     if (active) {
@@ -118,6 +124,7 @@ export class KuroCatEngine {
 
   public onPrivacyTyping(): void {
     this.privacyTypingAt = performance.now();
+    this.wakeRendering(this.privacyTypingAt);
     if (this.catBreed === 'dafeiyu') {
       this.dafeiyu.onPrivacyTyping();
     }
@@ -125,6 +132,7 @@ export class KuroCatEngine {
 
   public setRenderScale(scale: number): void {
     this.renderScale = Math.max(0.2, Math.min(1.5, scale));
+    this.wakeRendering();
   }
 
   public getLogicalSize(): { w: number; h: number } {
@@ -177,6 +185,7 @@ export class KuroCatEngine {
       this.customSkin = null;
     }
     this.syncLayoutPositions();
+    this.wakeRendering();
   }
 
   public setKeyboardConfig(layout: KeyboardLayoutId, orientation: KeyboardOrientation): void {
@@ -194,6 +203,7 @@ export class KuroCatEngine {
       this.rightPaw.pos = { x: this.catCenterX + 18, y: this.catBaseY };
       this.rightPaw.target = { x: this.catCenterX + 18, y: this.catBaseY };
     }
+    this.wakeRendering();
   }
 
   private buildDaFeiYuLayout(): DaFeiYuLayout {
@@ -369,25 +379,50 @@ export class KuroCatEngine {
     const cssH = Math.max(1, this.embedded ? (this.canvas.clientHeight || 440) : window.innerHeight);
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
+    this.wakeRendering();
   }
 
   public start(): void {
-    this.lastTime = performance.now();
-    const tick = (now: number) => {
-      const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
-      this.lastTime = now;
-      this.update(dt, now);
-      this.render();
-      if (this.onAfterRender) {
-        this.onAfterRender();
-      }
-      this.rafId = requestAnimationFrame(tick);
-    };
-    this.rafId = requestAnimationFrame(tick);
+    if (this.rafId !== null || this.idleFrameTimer !== null) return;
+    this.lastTime = this.lastActivityAt = performance.now();
+    this.rafId = requestAnimationFrame(this.renderFrame);
   }
 
   public stop(): void {
-    cancelAnimationFrame(this.rafId);
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    if (this.idleFrameTimer !== null) window.clearTimeout(this.idleFrameTimer);
+    this.rafId = null;
+    this.idleFrameTimer = null;
+  }
+
+  private readonly renderFrame = (now: number): void => {
+    const frameId = this.rafId;
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
+    this.lastTime = now;
+    this.update(dt, now);
+    this.render();
+    this.onAfterRender?.();
+
+    if (this.rafId !== frameId) return;
+    if (now - this.lastActivityAt < IDLE_RENDER_AFTER_MS) {
+      this.rafId = requestAnimationFrame(this.renderFrame);
+      return;
+    }
+
+    // Pause after drawing so even a slow frame leaves time for other work.
+    this.rafId = null;
+    this.idleFrameTimer = window.setTimeout(() => {
+      this.idleFrameTimer = null;
+      this.rafId = requestAnimationFrame(this.renderFrame);
+    }, IDLE_RENDER_PAUSE_MS);
+  };
+
+  private wakeRendering(now = performance.now()): void {
+    this.lastActivityAt = now;
+    if (this.idleFrameTimer === null) return;
+    window.clearTimeout(this.idleFrameTimer);
+    this.idleFrameTimer = null;
+    this.rafId = requestAnimationFrame(this.renderFrame);
   }
 
   // ---- Flexible spine coordinate system (exact match to measured 0.3s -> 2.2s shear!) ----
@@ -438,6 +473,7 @@ export class KuroCatEngine {
     const now = performance.now();
     const spec = resolveKeyByVk(vk, this.keyboardLayout);
     if (!spec) return;
+    this.wakeRendering(now);
 
     const anim = this.keyAnims.get(spec.id);
     if (anim) {
@@ -565,12 +601,14 @@ export class KuroCatEngine {
     if (this.privacyMode) return;
     const spec = resolveKeyByVk(vk, this.keyboardLayout);
     if (!spec) return;
+    this.wakeRendering();
     const anim = this.keyAnims.get(spec.id);
     if (anim) anim.pressed = false;
   }
 
   public onGlobalMouseMove(nx: number, ny: number): void {
     const now = performance.now();
+    this.wakeRendering(now);
     this.lastMouseNX = nx;
     this.mouseTargetOffsetX = (nx - 0.5) * (this.catBreed === 'dafeiyu' ? 14 : 28);
     this.mouseTargetOffsetY = (ny - 0.5) * (this.catBreed === 'dafeiyu' ? 11 : 20);
@@ -637,6 +675,7 @@ export class KuroCatEngine {
 
   public onMouseDown(button: string): void {
     const now = performance.now();
+    this.wakeRendering(now);
     if (button === 'left') {
       this.mouseLeftDown = true;
       this.mouseLeftPress = 1;
@@ -659,6 +698,7 @@ export class KuroCatEngine {
   }
 
   public onMouseUp(button: string): void {
+    this.wakeRendering();
     if (button === 'left') this.mouseLeftDown = false;
     else if (button === 'right') this.mouseRightDown = false;
     else if (button === 'middle') this.mouseMiddleDown = false;
@@ -666,6 +706,7 @@ export class KuroCatEngine {
 
   public onMouseWheel(): void {
     const now = performance.now();
+    this.wakeRendering(now);
     this.mouseScrollFlash = 1;
     this.lastMouseMoveAt = now;
     this.dafeiyu.resetLeftHandForMouse();
@@ -674,6 +715,9 @@ export class KuroCatEngine {
   }
 
   public onWindowCursor(relX: number, relY: number, overCat: boolean): void {
+    if (relX !== this.cursorRelX || relY !== this.cursorRelY || overCat !== this.cursorOverCat) {
+      this.wakeRendering();
+    }
     this.cursorRelX = relX;
     this.cursorRelY = relY;
     this.cursorOverCat = overCat;
