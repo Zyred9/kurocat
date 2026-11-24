@@ -24,7 +24,7 @@ use config::{
     normalize_tail_key_ids, normalize_tail_key_mode, save_settings, set_windows_autostart,
     AppSettings,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -211,6 +211,7 @@ pub fn run_mcp_stdio() {
 pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
     pub menu_open: Arc<AtomicBool>,
+    tail_picker_bounds: Arc<Mutex<Option<TailPickerBounds>>>,
     pub menu_creating: Arc<AtomicBool>,
     pub menu_opened_at: Arc<Mutex<Instant>>,
     pub dragging: Arc<AtomicBool>,
@@ -227,6 +228,12 @@ struct WindowCursorInfo {
     inside_window: bool,
     over_cat: bool,
     alt_override: bool,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+struct TailPickerBounds {
+    toolbar: [f64; 4],
+    keyboard: [f64; 4],
 }
 
 #[tauri::command]
@@ -613,6 +620,11 @@ fn get_obs_url(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn set_menu_open(state: State<'_, AppState>, open: bool) {
     state.menu_open.store(open, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn set_tail_picker_bounds(state: State<'_, AppState>, bounds: Option<TailPickerBounds>) {
+    *state.tail_picker_bounds.lock().unwrap() = bounds;
 }
 
 #[tauri::command]
@@ -1359,6 +1371,42 @@ fn is_over_interactive_silhouette(rx: f64, ry: f64, is_108: bool) -> (bool, bool
     (over_cat || over_desk, over_cat)
 }
 
+fn tail_picker_captures_cursor(
+    bounds: Option<TailPickerBounds>,
+    rx: f64,
+    ry: f64,
+    allow_keyboard: bool,
+) -> bool {
+    let Some(bounds) = bounds else {
+        return false;
+    };
+    let contains = |[left, top, right, bottom]: [f64; 4]| {
+        (left..=right).contains(&rx) && (top..=bottom).contains(&ry)
+    };
+    contains(bounds.toolbar) || (allow_keyboard && contains(bounds.keyboard))
+}
+
+#[cfg(test)]
+mod tail_picker_hit_tests {
+    use super::{tail_picker_captures_cursor, TailPickerBounds};
+
+    #[test]
+    fn captures_toolbar_and_keyboard_only_while_picker_is_open() {
+        let bounds = Some(TailPickerBounds {
+            toolbar: [0.05, 0.02, 0.95, 0.16],
+            keyboard: [0.13, 0.65, 0.95, 0.91],
+        });
+        assert!(tail_picker_captures_cursor(bounds, 0.87, 0.05, false));
+        assert!(tail_picker_captures_cursor(bounds, 0.5, 0.8, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.5, 0.8, false));
+        assert!(!tail_picker_captures_cursor(bounds, 0.99, 0.05, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.10, 0.89, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.5, 0.45, true));
+        assert!(!tail_picker_captures_cursor(None, 0.87, 0.05, false));
+        assert!(!tail_picker_captures_cursor(None, 0.5, 0.8, true));
+    }
+}
+
 fn start_hit_test_loop(
     app: AppHandle,
     settings: Arc<Mutex<AppSettings>>,
@@ -1367,6 +1415,7 @@ fn start_hit_test_loop(
     update_banner_open: Arc<AtomicBool>,
     paused_guard: Arc<AtomicBool>,
 ) {
+    let tail_picker_bounds = app.state::<AppState>().tail_picker_bounds.clone();
     std::thread::spawn(move || {
         let mut last_ignore: Option<bool> = None;
         let mut last_cursor: (i32, i32) = (i32::MIN, i32::MIN);
@@ -1444,6 +1493,7 @@ fn start_hit_test_loop(
             };
 
             let is_menu = menu_open.load(Ordering::Relaxed);
+            let picker_bounds = *tail_picker_bounds.lock().unwrap();
             let is_drag = dragging.load(Ordering::Relaxed);
             let is_banner = update_banner_open.load(Ordering::Relaxed);
 
@@ -1452,7 +1502,7 @@ fn start_hit_test_loop(
             // foreground window every ~150ms (and shortly after foreground switches), reasserting
             // HWND_TOPMOST strictly on the window owner thread without stealing focus (SWP_NOACTIVATE).
             #[cfg(windows)]
-            if always_on_top && !is_menu && !is_drag {
+            if always_on_top && !is_menu && picker_bounds.is_none() && !is_drag {
                 let fg_raw = win_foreground_hwnd();
                 let fg_id = fg_raw as isize;
                 if fg_id != last_fg_hwnd {
@@ -1557,10 +1607,11 @@ fn start_hit_test_loop(
             }
 
             let over_banner = is_banner && inside && ry <= 0.19;
+            // The picker lives inside the pet window, unlike the separate side menu.
+            let over_tail_picker =
+                inside && tail_picker_captures_cursor(picker_bounds, rx, ry, !is_win7_ulw);
 
-            // The context menu is its own independent OS window ("menu"), so do NOT disable
-            // click-through on "main"'s empty transparent padding when `is_menu` is true.
-            let should_ignore = if is_drag || over_banner {
+            let should_ignore = if is_drag || over_banner || over_tail_picker {
                 false
             } else if effective_locked {
                 true
@@ -1931,6 +1982,7 @@ pub fn run() {
         .manage(AppState {
             settings: settings_arc,
             menu_open,
+            tail_picker_bounds: Arc::new(Mutex::new(None)),
             menu_creating,
             menu_opened_at,
             dragging,
@@ -2112,6 +2164,7 @@ pub fn run() {
             open_tail_picker_from_menu,
             preview_scale,
             set_menu_open,
+            set_tail_picker_bounds,
             set_dragging,
             set_update_banner_open,
             is_win7_ulw_mode,
