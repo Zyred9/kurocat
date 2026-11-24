@@ -351,6 +351,7 @@ pub fn start_global_hooks(app: AppHandle) {
     std::thread::spawn(move || {
         let mut dedup = KeyDeduplicator::new();
         let mut last_mouse_emit = Instant::now() - Duration::from_secs(1);
+        let mut last_mouse_xy: Option<(i32, i32)> = None;
         let mut mouse_down = [false; 3]; // 0: left, 1: right, 2: middle
         let mut last_reconcile = Instant::now();
 
@@ -533,9 +534,16 @@ pub fn start_global_hooks(app: AppHandle) {
                         emit_input(&app, InputEvent::MouseWheel { delta });
                     }
                     RawHookMsg::MouseMove { x, y } => {
+                        // Drop synthetic 0px repeats and 1px optical sensor desk vibration so sleeping cats are never falsely woken!
+                        if let Some((lx, ly)) = last_mouse_xy {
+                            if (x - lx).abs() <= 1 && (y - ly).abs() <= 1 {
+                                continue;
+                            }
+                        }
                         let now = Instant::now();
                         if now.duration_since(last_mouse_emit) >= Duration::from_millis(16) {
                             last_mouse_emit = now;
+                            last_mouse_xy = Some((x, y));
                             let (nx, ny) = normalize_screen_point(x, y);
                             emit_input(&app, InputEvent::MouseMove { x, y, nx, ny });
                         }

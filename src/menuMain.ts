@@ -25,6 +25,9 @@ interface AppSettings {
   obsEnabled: boolean;
   obsPort: number;
   obsHidePet: boolean;
+  renderMode?: '2d' | '3d';
+  collarColor?: 'none' | 'red' | 'blue' | 'pink' | 'green';
+  headphoneMode?: 'auto' | 'on' | 'off';
 }
 
 interface UpdateInfo {
@@ -67,11 +70,14 @@ let settings: AppSettings = {
   obsEnabled: false,
   obsPort: 27421,
   obsHidePet: false,
+  renderMode: '3d',
+  collarColor: 'none',
+  headphoneMode: 'off',
 };
 
 let catList: CatSkinConfig[] = [...DEFAULT_BUILTIN_CATS];
 let sliderDragging = false;
-let currentAppVersion = '4.9.1';
+let currentAppVersion = '5.0.1';
 
 const menuEl = document.getElementById('context-menu') as HTMLDivElement;
 const breedPillsEl = document.getElementById('breed-pills') as HTMLDivElement;
@@ -170,6 +176,37 @@ function syncUI(): void {
 
   const activeCat = catList.find((c) => c.id === settings.catBreed) ?? catList[0];
   renderBreedPills();
+
+  const renderMode = settings.renderMode === '2d' ? '2d' : '3d';
+  const collarColor =
+    settings.collarColor === 'red' ||
+    settings.collarColor === 'blue' ||
+    settings.collarColor === 'pink' ||
+    settings.collarColor === 'green'
+      ? settings.collarColor
+      : 'none';
+  document.querySelectorAll<HTMLButtonElement>('[data-rendermode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.rendermode === renderMode);
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-collar]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.collar === collarColor);
+  });
+  const collarRowEl = document.getElementById('collar-row');
+  if (collarRowEl) {
+    collarRowEl.classList.toggle('hidden', renderMode === '2d' || settings.catBreed === 'dafeiyu');
+  }
+
+  const headphoneMode =
+    settings.headphoneMode === 'auto' || settings.headphoneMode === 'on'
+      ? settings.headphoneMode
+      : 'off';
+  document.querySelectorAll<HTMLButtonElement>('[data-headphonemode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.headphonemode === headphoneMode);
+  });
+  const headphoneRowEl = document.getElementById('headphone-row');
+  if (headphoneRowEl) {
+    headphoneRowEl.classList.toggle('hidden', settings.catBreed === 'dafeiyu');
+  }
 
   const headerEl = document.getElementById('menu-header');
   if (headerEl && activeCat) {
@@ -356,9 +393,33 @@ async function bootstrap(): Promise<void> {
 
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
-      '[data-action], [data-breed], [data-kblayout], [data-kborient], [data-tailmode]',
+      '[data-action], [data-breed], [data-rendermode], [data-collar], [data-headphonemode], [data-kblayout], [data-kborient], [data-tailmode]',
     );
     if (!target) return;
+
+    const headphoneAttr = target.dataset.headphonemode;
+    if (headphoneAttr === 'auto' || headphoneAttr === 'on' || headphoneAttr === 'off') {
+      void applySettingsPatch({ headphoneMode: headphoneAttr });
+      return;
+    }
+
+    const renderModeAttr = target.dataset.rendermode;
+    if (renderModeAttr === '2d' || renderModeAttr === '3d') {
+      void applySettingsPatch({ renderMode: renderModeAttr });
+      return;
+    }
+
+    const collarAttr = target.dataset.collar;
+    if (
+      collarAttr === 'none' ||
+      collarAttr === 'red' ||
+      collarAttr === 'blue' ||
+      collarAttr === 'pink' ||
+      collarAttr === 'green'
+    ) {
+      void applySettingsPatch({ collarColor: collarAttr });
+      return;
+    }
 
     const kbLayoutAttr = target.dataset.kblayout;
     if (kbLayoutAttr === '65' || kbLayoutAttr === '108') {

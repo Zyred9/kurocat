@@ -129,6 +129,56 @@ class Spring {
   }
 }
 
+function parseHexRgb(color: string): [number, number, number] | null {
+  const c = color.trim();
+  const hex = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+  const rgb = c.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+  if (rgb) {
+    return [parseFloat(rgb[1]), parseFloat(rgb[2]), parseFloat(rgb[3])];
+  }
+  return null;
+}
+
+function blendHex(colorA: string, colorB: string, t: number): string {
+  const a = parseHexRgb(colorA);
+  const b = parseHexRgb(colorB);
+  if (!a || !b) return colorA;
+  const u = Math.max(0, Math.min(1, t));
+  const r = Math.round(a[0] + (b[0] - a[0]) * u);
+  const g = Math.round(a[1] + (b[1] - a[1]) * u);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * u);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+function colorWithAlpha(color: string, alpha: number): string {
+  const a = Math.max(0, Math.min(1, alpha));
+  const c = color.trim();
+  const hex = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
+  }
+  const rgb = c.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+  if (rgb) {
+    const baseA = rgb[4] !== undefined ? parseFloat(rgb[4]) : 1;
+    return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${(baseA * a).toFixed(3)})`;
+  }
+  return c;
+}
+
 interface CatFxParticle {
   kind: 'bang' | 'dust' | 'z';
   x: number;
@@ -175,6 +225,8 @@ const FATIGUE_CROSS_FADE_AT = 0.42;
 
 const IDLE_RENDER_AFTER_MS = 3000;
 const IDLE_RENDER_PAUSE_MS = 40;
+const KEYBOARD_HIT_HALF_WIDTH_RATIO = 0.54;
+const KEYBOARD_HIT_HALF_HEIGHT_RATIO = 0.56;
 
 export class KuroCatEngine {
   private canvas: HTMLCanvasElement;
@@ -195,6 +247,7 @@ export class KuroCatEngine {
   public tailKeyMode: TailKeyMode = 'smart';
   private tailKeyIdSet = new Set<string>(DEFAULT_TAIL_KEY_IDS);
   private tailPickerActive = false;
+  private tailPickerSelection: ReadonlySet<string> | null = null;
   private tailPickerHoverId: string | null = null;
   private renderScale = 1.0;
   private embedded = false;
@@ -267,8 +320,9 @@ export class KuroCatEngine {
     this.wakeRendering();
   }
 
-  public setTailPickerActive(active: boolean): void {
+  public setTailPickerActive(active: boolean, selection?: ReadonlySet<string>): void {
     this.tailPickerActive = Boolean(active);
+    this.tailPickerSelection = this.tailPickerActive ? selection ?? null : null;
     if (!this.tailPickerActive) {
       this.tailPickerHoverId = null;
     }
@@ -354,6 +408,27 @@ export class KuroCatEngine {
     };
   }
 
+  public getKeyboardClientBounds(): DOMRect {
+    const rect = this.canvas.getBoundingClientRect();
+    const { offsetX, offsetY, uniformScale } = this.getViewportTransform();
+    const scaleX = rect.width / this.canvas.width;
+    const scaleY = rect.height / this.canvas.height;
+    const sin = Math.abs(Math.sin(this.kbTiltRad));
+    const cos = Math.abs(Math.cos(this.kbTiltRad));
+    const halfWidth = this.kbWidth * KEYBOARD_HIT_HALF_WIDTH_RATIO;
+    const halfHeight = this.kbHeight * KEYBOARD_HIT_HALF_HEIGHT_RATIO;
+    const boundX = (halfWidth * cos + halfHeight * sin) * uniformScale;
+    const boundY = (halfWidth * sin + halfHeight * cos) * uniformScale;
+    const centerX = offsetX + this.kbCenterX * uniformScale;
+    const centerY = offsetY + this.kbCenterY * uniformScale;
+    return new DOMRect(
+      rect.left + (centerX - boundX) * scaleX,
+      rect.top + (centerY - boundY) * scaleY,
+      2 * boundX * scaleX,
+      2 * boundY * scaleY,
+    );
+  }
+
   public hitTestKeyAtClientPoint(clientX: number, clientY: number): KeySpec | null {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return null;
@@ -379,8 +454,8 @@ export class KuroCatEngine {
     const innerW = this.kbWidth - padX * 2;
     const innerH = this.kbHeight - padY * 2;
     if (
-      Math.abs(kx) > this.kbWidth * 0.54 ||
-      Math.abs(ky) > this.kbHeight * 0.56
+      Math.abs(kx) > this.kbWidth * KEYBOARD_HIT_HALF_WIDTH_RATIO ||
+      Math.abs(ky) > this.kbHeight * KEYBOARD_HIT_HALF_HEIGHT_RATIO
     ) {
       return null;
     }
@@ -503,8 +578,8 @@ export class KuroCatEngine {
       this.kbWidth = 266;
       this.kbHeight = 74;
       this.kbTiltRad = (3.4 * Math.PI) / 180;
-      this.mouseBaseX = isBigFish ? 72 : 46;
-      this.mouseBaseY = isBigFish ? 322 : 338;
+      this.mouseBaseX = isBigFish ? 72 : 54;
+      this.mouseBaseY = isBigFish ? 322 : 334;
     }
   }
 
@@ -526,6 +601,17 @@ export class KuroCatEngine {
     }
     this.syncLayoutPositions();
     this.wakeRendering();
+  }
+
+  public setHeadphones(active: boolean): void {
+    const next = Boolean(active);
+    if (next !== this.headphonesOn) {
+      this.headphonesOn = next;
+      if (next) {
+        this.headsetSpring.v += 2.2;
+      }
+      this.wakeRendering();
+    }
   }
 
   public setKeyboardConfig(layout: KeyboardLayoutId, orientation: KeyboardOrientation): void {
@@ -595,8 +681,8 @@ export class KuroCatEngine {
   private kbTiltRad = (3.4 * Math.PI) / 180;
 
   // True-scale white oval mouse to the left of keyboard
-  private mouseBaseX = 46;
-  private mouseBaseY = 338;
+  private mouseBaseX = 54;
+  private mouseBaseY = 334;
   private mouseOffsetX = 0;
   private mouseOffsetY = 0;
   private mouseTargetOffsetX = 0;
@@ -647,6 +733,8 @@ export class KuroCatEngine {
   private curiousSpring = new Spring(0, 3.8, 0.72);
   private crossSpring = new Spring(0, 1.9, 0.86);
   private deskHopSpring = new Spring(0, 9.2, 0.34);
+  private headsetSpring = new Spring(0, 5.4, 0.70);
+  private headphonesOn = false;
 
   // Alive cat emotional state machine: curious (laser-pointer eyes), sleepy loaf (Zzz), idle fidgets, cross (airplane ears + tail desk-thump!)
   private lastInputAt = performance.now();
@@ -755,8 +843,8 @@ export class KuroCatEngine {
 
     this.leftPaw = {
       side: 'left',
-      shoulderNormY: 0.50,
-      shoulderHalfX: -32,
+      shoulderNormY: 0.65,
+      shoulderHalfX: -43,
       pos: { x: this.catCenterX - 18, y: this.catBaseY },
       vel: { x: 0, y: 0 },
       target: { x: this.catCenterX - 18, y: this.catBaseY },
@@ -771,8 +859,8 @@ export class KuroCatEngine {
 
     this.rightPaw = {
       side: 'right',
-      shoulderNormY: 0.50,
-      shoulderHalfX: 32,
+      shoulderNormY: 0.65,
+      shoulderHalfX: 43,
       pos: { x: this.catCenterX + 18, y: this.catBaseY },
       vel: { x: 0, y: 0 },
       target: { x: this.catCenterX + 18, y: this.catBaseY },
@@ -1266,6 +1354,14 @@ export class KuroCatEngine {
   public onGlobalMouseMove(nx: number, ny: number): void {
     const now = performance.now();
     const moveDelta = Math.hypot(nx - this.lastMouseNX, ny - this.lastMouseNY);
+
+    // Ignore 0px synthetic repeats & tiny optical-sensor micro-jitter (~3-4px; ~7-8px when napping)
+    // so the sleep countdown is never silently reset and a desk bump never wakes a sleeping cat!
+    const jitterThreshold = this.asleep || this.sleepAmount > 0.35 ? 0.006 : 0.0028;
+    if (moveDelta < jitterThreshold) {
+      return;
+    }
+
     this.lastMouseNX = nx;
     this.lastMouseNY = ny;
 
@@ -1280,8 +1376,8 @@ export class KuroCatEngine {
     if (!this.embedded) {
       this.recordPointerSpeed(nx, ny, now);
     }
-    this.mouseTargetOffsetX = (nx - 0.5) * (this.catBreed === 'dafeiyu' ? 14 : 28);
-    this.mouseTargetOffsetY = (ny - 0.5) * (this.catBreed === 'dafeiyu' ? 11 : 20);
+    this.mouseTargetOffsetX = (nx - 0.5) * (this.catBreed === 'dafeiyu' ? 14 : 20);
+    this.mouseTargetOffsetY = (ny - 0.5) * (this.catBreed === 'dafeiyu' ? 11 : 18);
     this.lastMouseMoveAt = now;
 
     this.leftPaw.mode = 'mouse';
@@ -1681,7 +1777,7 @@ export class KuroCatEngine {
     const isCatMode = this.catBreed !== 'dafeiyu';
 
     // 1) Alive cat emotional states: sleep (loaf + Zzz), curious (laser-pointer eyes), annoy -> cross (airplane ears + tail desk-thump), idle fidgets!
-    const sleepAfterMs = this.embedded ? 26_000 : 58_000;
+    const sleepAfterMs = this.embedded ? 18_000 : 28_000;
     const idleMs = now - this.lastInputAt;
     if (isCatMode && !this.privacyMode && !this.asleep && this.petEnergy < 0.15 && idleMs > sleepAfterMs) {
       this.asleep = true;
@@ -1947,6 +2043,7 @@ export class KuroCatEngine {
     }
 
     this.deskHopY = this.deskHopSpring.step(0, dt);
+    this.headsetSpring.step(this.headphonesOn ? 1 : 0, dt);
 
     // Floating sleepy comic "Z" particles when asleep
     if (isCatMode && this.sleepAmount > 0.68 && now >= this.nextZAt) {
@@ -2989,6 +3086,7 @@ export class KuroCatEngine {
       ctx.restore();
     };
 
+    this.drawHeadphonesBack(ctx);
     drawOneEar(-1, lTwitch);
     drawOneEar(1, rTwitch);
 
@@ -3050,6 +3148,7 @@ export class KuroCatEngine {
 
     // 6) Expressive eyes (lemon-chartreuse for Black Cat / luminous sapphire-blue for Ragdoll!)
     this.drawEyes(ctx, wShift, -1);
+    this.drawHeadphonesFront(ctx);
 
     ctx.restore(); // end head
 
@@ -3067,6 +3166,195 @@ export class KuroCatEngine {
     ctx.lineTo(-rx - 1, openRy + 1);
     ctx.closePath();
     ctx.clip();
+  }
+
+  private getHeadphoneLedColors(): { ring: string; glow: string; mic: string } {
+    const rgbMix = 0.5 + 0.5 * Math.sin(this.elapsed * 2.3 + this.typingEnergy * 2.0);
+    const pulse = 0.88 + 0.12 * Math.sin(this.elapsed * 5.2) + this.typingEnergy * 0.14;
+    const t = rgbMix * 0.58;
+    const r = Math.min(255, Math.round((212 * (1 - t) + 61 * t) * pulse));
+    const g = Math.min(255, Math.round((245 * (1 - t) + 242 * t) * pulse));
+    const b = Math.min(255, Math.round((61 * (1 - t) + 232 * t) * pulse));
+    return {
+      ring: `rgb(${r}, ${g}, ${b})`,
+      glow: `rgba(${r}, ${g}, ${b}, 0.58)`,
+      mic: `rgba(82, 247, 212, ${(0.82 + 0.18 * Math.sin(this.elapsed * 3.8)).toFixed(2)})`,
+    };
+  }
+
+  /** Pass 1 (behind ears): sleek arched padded gaming headband + titanium sliders! */
+  private drawHeadphonesBack(ctx: CanvasRenderingContext2D): void {
+    const hs = Math.max(0, Math.min(1.18, this.headsetSpring.x));
+    if (hs <= 0.015) return;
+
+    const settled = Math.min(1, hs);
+    const dropY = -(1 - settled) * 38;
+    const sc = 0.86 + 0.14 * settled + Math.max(0, hs - 1) * 0.12;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, settled * 1.45);
+    ctx.translate(0, dropY);
+    ctx.scale(sc, sc);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const traceArch = (inset = 0) => {
+      ctx.beginPath();
+      ctx.moveTo(-64 + inset * 0.7, 4);
+      ctx.bezierCurveTo(-66 + inset * 0.7, -34 + inset, -34, -56 + inset, 0, -56 + inset);
+      ctx.bezierCurveTo(34, -56 + inset, 66 - inset * 0.7, -34 + inset, 64 - inset * 0.7, 4);
+    };
+
+    // Subtle light specular outline so headband reads crisply even on pure Black Cat!
+    traceArch(0);
+    ctx.strokeStyle = '#6f7e99';
+    ctx.lineWidth = 12.2;
+    ctx.stroke();
+
+    // Matte-charcoal outer headband shell
+    traceArch(0);
+    ctx.strokeStyle = '#242a36';
+    ctx.lineWidth = 10.0;
+    ctx.stroke();
+
+    // Soft top satin highlight along crown
+    ctx.beginPath();
+    ctx.moveTo(-26, -54.2);
+    ctx.quadraticCurveTo(0, -58.5, 26, -54.2);
+    ctx.strokeStyle = 'rgba(216, 228, 248, 0.36)';
+    ctx.lineWidth = 2.0;
+    ctx.stroke();
+
+    // Plush under-crown inner foam pad
+    ctx.beginPath();
+    ctx.moveTo(-28, -48.5);
+    ctx.quadraticCurveTo(0, -52.5, 28, -48.5);
+    ctx.strokeStyle = '#3b4454';
+    ctx.lineWidth = 5.4;
+    ctx.stroke();
+
+    // Brushed-titanium lower side slider brackets
+    for (const s of [-1, 1] as const) {
+      ctx.beginPath();
+      ctx.moveTo(s * 62.5, -14);
+      ctx.lineTo(s * 64.0, 2);
+      ctx.strokeStyle = '#a2afc4';
+      ctx.lineWidth = 6.2;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /** Pass 2 (in front of cheeks): plush over-ear cups, glowing LED rings & curved boom mic! */
+  private drawHeadphonesFront(ctx: CanvasRenderingContext2D): void {
+    const hs = Math.max(0, Math.min(1.18, this.headsetSpring.x));
+    if (hs <= 0.015) return;
+
+    const settled = Math.min(1, hs);
+    const dropY = -(1 - settled) * 38;
+    const sc = 0.86 + 0.14 * settled + Math.max(0, hs - 1) * 0.12;
+    const led = this.getHeadphoneLedColors();
+    const turnShift = this.faceTurnX * 0.25;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, settled * 1.45);
+    ctx.translate(0, dropY);
+    ctx.scale(sc, sc);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    for (const s of [-1, 1] as const) {
+      ctx.save();
+      ctx.translate(s * 60 + turnShift * 0.5, 5);
+      ctx.rotate(s * 0.09);
+
+      // Inner plush memory-foam cheek cushion
+      ctx.fillStyle = '#384050';
+      ctx.strokeStyle = '#1b1f29';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(-s * 3.5, 0, 10.5, 19.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Domed matte-charcoal outer earcup shell
+      const cupGrad = ctx.createLinearGradient(-10, -18, 10, 18);
+      cupGrad.addColorStop(0.0, '#363e4f');
+      cupGrad.addColorStop(0.55, '#242934');
+      cupGrad.addColorStop(1.0, '#191d26');
+      ctx.fillStyle = cupGrad;
+      ctx.strokeStyle = '#8fa0bd';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(s * 4.2, 0, 10.2, 18.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Reactive KuroCat-lime / electric-cyan gaming LED ring!
+      ctx.save();
+      ctx.shadowColor = led.glow;
+      ctx.shadowBlur = 7;
+      ctx.strokeStyle = led.ring;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.ellipse(s * 6.0, 0, 5.4, 11.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = led.ring;
+      ctx.beginPath();
+      ctx.ellipse(s * 6.4, 0, 1.9, 2.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.restore();
+    }
+
+    // Sleek curved flexible boom microphone from left earcup (-X) curving beside lower cheek
+    const mx0 = -60 + turnShift * 0.5;
+    const mxTip = -22 + this.faceTurnX * 0.55;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#5c6980';
+    ctx.lineWidth = 4.6;
+    ctx.beginPath();
+    ctx.moveTo(mx0, 14);
+    ctx.quadraticCurveTo(mx0 + 6, 29, mxTip, 23);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#1f242f';
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.moveTo(mx0, 14);
+    ctx.quadraticCurveTo(mx0 + 6, 29, mxTip, 23);
+    ctx.stroke();
+
+    // Metallic swivel joint on earcup
+    ctx.fillStyle = '#a2afc4';
+    ctx.beginPath();
+    ctx.arc(mx0, 14, 3.0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Plush charcoal foam windscreen capsule + glowing mic-live indicator dot
+    ctx.fillStyle = '#333b4a';
+    ctx.strokeStyle = '#73829c';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(mxTip + 2.5, 22.4, 5.6, 3.8, -0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = led.mic;
+    ctx.shadowColor = led.mic;
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.arc(mxTip + 6.2, 21.5, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
   }
 
   private drawEyes(ctx: CanvasRenderingContext2D, cx: number, eyeY: number): void {
@@ -3427,11 +3715,12 @@ export class KuroCatEngine {
     const rowH = innerH / layout.totalRows;
     const unitW = innerW / layout.totalUnits;
     const gap = is108 ? 0.85 : 0.9;
+    const selectedTailKeys = this.tailPickerSelection ?? this.tailKeyIdSet;
 
     for (const key of layout.keys) {
       const anim = this.keyAnims.get(key.id);
       const press = anim ? anim.pressAmount : 0;
-      const isTailSelected = this.tailPickerActive && this.tailKeyIdSet.has(key.id);
+      const isTailSelected = this.tailPickerActive && selectedTailKeys.has(key.id);
       const isTailHovered = this.tailPickerActive && this.tailPickerHoverId === key.id;
 
       const rY = key.rowY ?? key.row;
@@ -3570,6 +3859,7 @@ export class KuroCatEngine {
     py: number,
     squash: number,
     withCrease: boolean,
+    isSmear = false,
   ): void {
     const dx = px - sx;
     const dy = py - sy;
@@ -3583,26 +3873,41 @@ export class KuroCatEngine {
     const wx = sx + ux * wristDist;
     const wy = sy + uy * wristDist;
 
-    // True-scale plush proportions for 248px tall cat!
-    const rShoulder = 14.2;
-    const rWrist = 9.4;
-    const pawRx = 14.5 * (1 + squash * 0.14);
-    const pawRy = 11.8 * (1 - squash * 0.12);
+    // Cute chubby plush proportions!
+    const rShoulder = 15.0;
+    const rWrist = 10.6;
+    const pawRx = 14.8 * (1 + squash * 0.14);
+    const pawRy = 12.0 * (1 - squash * 0.12);
 
     if (this.customSkin) {
-      this.drawCustomPlumpArm(ctx, this.customSkin, side, sx, sy, px, py, squash, withCrease);
+      this.drawCustomPlumpArm(ctx, this.customSkin, side, sx, sy, px, py, squash, withCrease, isSmear);
       return;
     }
 
     const isRagdoll = this.catBreed === 'ragdoll';
     ctx.save();
 
+    // Subtle organic plush kitten-arm bow (avoids stiff straight broomstick look!)
+    const bowSide = side === 'left' ? -1 : 1;
+    const bowAmp = Math.min(7.5, len * 0.052);
+    const midX = (sx + wx) * 0.5 + bowSide * bowAmp * Math.abs(uy);
+    const midY = (sy + wy) * 0.5 + bowAmp * 0.45 * Math.abs(ux);
+
     if (isRagdoll) {
       // Seamless pure creamy snow-white Ragdoll mitten arm melting smoothly out of the white chest!
       const armGrad = ctx.createLinearGradient(sx, sy, px, py);
-      armGrad.addColorStop(0.0, '#f5f1e8');
-      armGrad.addColorStop(0.5, '#f9f6ef');
-      armGrad.addColorStop(1.0, '#fcfaf4');
+      if (isSmear) {
+        armGrad.addColorStop(0.0, 'rgba(249, 246, 239, 0.0)');
+        armGrad.addColorStop(0.45, 'rgba(249, 246, 239, 0.0)');
+        armGrad.addColorStop(0.75, 'rgba(249, 246, 239, 0.58)');
+        armGrad.addColorStop(1.0, 'rgba(252, 250, 244, 0.85)');
+      } else {
+        armGrad.addColorStop(0.0, 'rgba(226, 219, 208, 0.0)');
+        armGrad.addColorStop(0.11, 'rgba(232, 226, 216, 1.0)');
+        armGrad.addColorStop(0.32, '#f5f1e8');
+        armGrad.addColorStop(0.62, '#f9f6ef');
+        armGrad.addColorStop(1.0, '#fcfaf4');
+      }
 
       ctx.fillStyle = armGrad;
 
@@ -3611,15 +3916,15 @@ export class KuroCatEngine {
         ctx.beginPath();
         ctx.moveTo(sx + nx * rShoulder, sy + ny * rShoulder);
         ctx.quadraticCurveTo(
-          (sx + wx) * 0.5 + nx * (rShoulder * 0.84),
-          (sy + wy) * 0.5 + ny * (rShoulder * 0.84),
+          midX + nx * (rShoulder * 0.86),
+          midY + ny * (rShoulder * 0.86),
           wx + nx * rWrist,
           wy + ny * rWrist,
         );
         ctx.lineTo(wx - nx * rWrist, wy - ny * rWrist);
         ctx.quadraticCurveTo(
-          (sx + wx) * 0.5 - nx * (rShoulder * 0.84),
-          (sy + wy) * 0.5 - ny * (rShoulder * 0.84),
+          midX - nx * (rShoulder * 0.86),
+          midY - ny * (rShoulder * 0.86),
           sx - nx * rShoulder,
           sy - ny * rShoulder,
         );
@@ -3628,13 +3933,8 @@ export class KuroCatEngine {
       traceArmPath();
       ctx.fill();
 
-      // Seamless white shoulder merge (invisible against white chest — ZERO grey shoulder blob!)
-      ctx.beginPath();
-      ctx.arc(sx, sy, rShoulder, 0, Math.PI * 2);
-      ctx.fill();
-
       // Signature unique marking from user's real Ragdoll photo: adorable warm taupe-brown oval patch on viewer's RIGHT front forearm!
-      if (side === 'right' && len > 26) {
+      if (!isSmear && side === 'right' && len > 26) {
         ctx.save();
         traceArmPath();
         ctx.clip();
@@ -3652,82 +3952,102 @@ export class KuroCatEngine {
 
       // Soft subtle contact shadow ONLY under the plump round white mitten paw ball
       ctx.save();
-      ctx.shadowColor = 'rgba(46, 38, 30, 0.22)';
-      ctx.shadowBlur = 4;
-      ctx.shadowOffsetY = 1.5;
+      if (!isSmear) {
+        ctx.shadowColor = 'rgba(46, 38, 30, 0.22)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 1.5;
+      }
       ctx.fillStyle = '#fcfaf4';
       ctx.beginPath();
       ctx.ellipse(px, py, pawRx, pawRy, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
-      // Refined warm-taupe arm side strokes that fade gently out at the shoulder and stay crisp along forearm & paw!
-      ctx.lineWidth = 1.65;
-      ctx.lineCap = 'round';
-      for (const sgn of [-1, 1]) {
-        const startFrac = withCrease ? 0.16 : 0.08;
-        const esx = sx + ux * (len * startFrac) + nx * sgn * (rShoulder * (1 - startFrac * 0.16));
-        const esy = sy + uy * (len * startFrac) + ny * sgn * (rShoulder * (1 - startFrac * 0.16));
-        const eex = wx + nx * sgn * rWrist;
-        const eey = wy + ny * sgn * rWrist;
+      if (!isSmear) {
+        // Refined warm-taupe arm side strokes that fade gently in ONLY near lower torso/forearm (exact de Casteljau curve!)
+        ctx.lineWidth = 1.65;
+        ctx.lineCap = 'round';
+        const startFrac = withCrease ? 0.22 : 0.18;
+        for (const sgn of [-1, 1]) {
+          const p0x = sx + nx * sgn * rShoulder;
+          const p0y = sy + ny * sgn * rShoulder;
+          const p1x = midX + nx * sgn * (rShoulder * 0.86);
+          const p1y = midY + ny * sgn * (rShoulder * 0.86);
+          const p2x = wx + nx * sgn * rWrist;
+          const p2y = wy + ny * sgn * rWrist;
 
-        const edgeGrad = ctx.createLinearGradient(esx, esy, eex, eey);
-        edgeGrad.addColorStop(0.0, 'rgba(93, 81, 72, 0.0)');
-        edgeGrad.addColorStop(0.24, 'rgba(93, 81, 72, 0.78)');
-        edgeGrad.addColorStop(1.0, 'rgba(93, 81, 72, 0.92)');
+          const q0x = p0x + (p1x - p0x) * startFrac;
+          const q0y = p0y + (p1y - p0y) * startFrac;
+          const q1x = p1x + (p2x - p1x) * startFrac;
+          const q1y = p1y + (p2y - p1y) * startFrac;
+          const esx = q0x + (q1x - q0x) * startFrac;
+          const esy = q0y + (q1y - q0y) * startFrac;
 
-        ctx.strokeStyle = edgeGrad;
+          const edgeGrad = ctx.createLinearGradient(esx, esy, p2x, p2y);
+          edgeGrad.addColorStop(0.0, 'rgba(93, 81, 72, 0.0)');
+          edgeGrad.addColorStop(0.28, 'rgba(93, 81, 72, 0.74)');
+          edgeGrad.addColorStop(1.0, 'rgba(93, 81, 72, 0.90)');
+
+          ctx.strokeStyle = edgeGrad;
+          ctx.beginPath();
+          ctx.moveTo(esx, esy);
+          ctx.quadraticCurveTo(q1x, q1y, p2x, p2y);
+          ctx.stroke();
+        }
+
+        // Crisp rounded mitten paw outline arc so the white paw reads clearly against white keyboard keys!
+        const pawAng = Math.atan2(dy, dx);
+        ctx.strokeStyle = 'rgba(93, 81, 72, 0.92)';
         ctx.beginPath();
-        ctx.moveTo(esx, esy);
-        ctx.quadraticCurveTo(
-          (sx + wx) * 0.5 + nx * sgn * (rShoulder * 0.84),
-          (sy + wy) * 0.5 + ny * sgn * (rShoulder * 0.84),
-          eex,
-          eey,
-        );
+        ctx.ellipse(px, py, pawRx, pawRy, 0, pawAng - Math.PI * 0.62, pawAng + Math.PI * 0.62);
         ctx.stroke();
       }
-
-      // Crisp rounded mitten paw outline arc so the white paw reads clearly against white keyboard keys!
-      const pawAng = Math.atan2(dy, dx);
-      ctx.strokeStyle = 'rgba(93, 81, 72, 0.92)';
-      ctx.beginPath();
-      ctx.ellipse(px, py, pawRx, pawRy, 0, pawAng - Math.PI * 0.62, pawAng + Math.PI * 0.62);
-      ctx.stroke();
 
       ctx.restore();
       return;
     }
 
     ctx.shadowColor = 'rgba(18, 17, 18, 0.42)';
-    ctx.shadowBlur = 1.6;
-    ctx.fillStyle = '#141314';
+    ctx.shadowBlur = isSmear ? 0 : 1.6;
+    if (isSmear) {
+      const smearGrad = ctx.createLinearGradient(sx, sy, px, py);
+      smearGrad.addColorStop(0.0, 'rgba(20, 19, 20, 0.0)');
+      smearGrad.addColorStop(0.40, 'rgba(20, 19, 20, 0.0)');
+      smearGrad.addColorStop(0.72, 'rgba(20, 19, 20, 0.65)');
+      smearGrad.addColorStop(1.0, 'rgba(20, 19, 20, 1.0)');
+      ctx.fillStyle = smearGrad;
+    } else {
+      ctx.fillStyle = '#141314';
+    }
 
     // Arm silhouette tapering gently from shoulder to wrist
     ctx.beginPath();
     ctx.moveTo(sx + nx * rShoulder, sy + ny * rShoulder);
     ctx.quadraticCurveTo(
-      (sx + wx) * 0.5 + nx * (rShoulder * 0.84),
-      (sy + wy) * 0.5 + ny * (rShoulder * 0.84),
+      midX + nx * (rShoulder * 0.86),
+      midY + ny * (rShoulder * 0.86),
       wx + nx * rWrist,
       wy + ny * rWrist,
     );
     ctx.lineTo(wx - nx * rWrist, wy - ny * rWrist);
     ctx.quadraticCurveTo(
-      (sx + wx) * 0.5 - nx * (rShoulder * 0.84),
-      (sy + wy) * 0.5 - ny * (rShoulder * 0.84),
+      midX - nx * (rShoulder * 0.86),
+      midY - ny * (rShoulder * 0.86),
       sx - nx * rShoulder,
       sy - ny * rShoulder,
     );
     ctx.closePath();
     ctx.fill();
 
-    // Seamless shoulder merge
-    ctx.beginPath();
-    ctx.arc(sx, sy, rShoulder, 0, Math.PI * 2);
-    ctx.fill();
+    // Seamless shoulder merge (not needed on smears)
+    if (!isSmear) {
+      ctx.beginPath();
+      ctx.arc(sx, sy, rShoulder, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Plump, soft rounded black velvet paw ball pressing firmly onto the key!
+    ctx.fillStyle = '#141314';
     ctx.beginPath();
     ctx.ellipse(px, py, pawRx, pawRy, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -3735,7 +4055,7 @@ export class KuroCatEngine {
     ctx.shadowBlur = 0;
 
     // Clean crisp subtle light-grey side separation lines ONLY where the arm crosses the black body (exact 2.2s / 8.3s / 13.2s!)
-    if (withCrease && len > 28) {
+    if (!isSmear && withCrease && len > 28) {
       const startFrac = 0.18;
       const endFrac = 0.72;
       for (const sgn of [-1, 1]) {
@@ -3843,7 +4163,7 @@ export class KuroCatEngine {
       if (paw.side === 'right' && this.leftPaw.mode === 'mouse') {
         const sh = this.getLiveShoulder(paw, breath);
         const baseSp = this.spinePoint(1.0, breath);
-        this.drawPlumpCatArm(ctx, 'right', sh.x - 4, sh.y + 8, baseSp.x + 28, baseSp.y - 2, 0, true);
+        this.drawPlumpCatArm(ctx, 'right', sh.x, sh.y + 4, baseSp.x + 30, baseSp.y - 2, 0, true);
       } else {
         // Exact 4-line seated leg silhouette from ORIG 0.3s (outer curved leg line + crisp inner center-gap line!)
         const topSp = this.spinePoint(0.66, breath);
@@ -3929,13 +4249,14 @@ export class KuroCatEngine {
 
       for (const sm of paw.smears) {
         ctx.save();
-        ctx.globalAlpha = Math.max(0, sm.alpha * activeArmWeight);
-        this.drawPlumpCatArm(ctx, paw.side, sm.sx, sm.sy, sm.px, sm.py, 0, false);
+        const smearMult = this.customSkin || this.catBreed === 'ragdoll' ? 0.58 : 1.0;
+        ctx.globalAlpha = Math.max(0, sm.alpha * activeArmWeight * smearMult);
+        this.drawPlumpCatArm(ctx, paw.side, sm.sx, sm.sy, sm.px, sm.py, 0, false, true);
         ctx.restore();
       }
 
       // Keep mouse-reaching arm pure velvet black in open air (ORIG 2.2s); show subtle separation lines when poking across black torso!
-      this.drawPlumpCatArm(ctx, paw.side, sh.x, sh.y, px, py, paw.impactSquash, paw.mode !== 'mouse');
+      this.drawPlumpCatArm(ctx, paw.side, sh.x, sh.y, px, py, paw.impactSquash, paw.mode !== 'mouse', false);
       ctx.restore();
     }
   }
@@ -4443,6 +4764,7 @@ export class KuroCatEngine {
       ctx.restore();
     };
 
+    this.drawHeadphonesBack(ctx);
     drawCustomEar(-1, lTwitch);
     drawCustomEar(1, rTwitch);
 
@@ -4504,6 +4826,7 @@ export class KuroCatEngine {
     }
 
     this.drawCustomEyes(ctx, s, wShift, -1);
+    this.drawHeadphonesFront(ctx);
 
     ctx.restore();
     ctx.restore();
@@ -4659,7 +4982,13 @@ export class KuroCatEngine {
     py: number,
     squash: number,
     withCrease: boolean,
+    isSmear = false,
   ): void {
+    // Keep dark-coat tuxedo shoulders cleanly outside the white chest bib
+    if (s.isDarkBase && s.bellyBibColor) {
+      sx += side === 'left' ? -5 : 5;
+    }
+
     const dx = px - sx;
     const dy = py - sy;
     const len = Math.max(1, Math.hypot(dx, dy));
@@ -4670,42 +4999,92 @@ export class KuroCatEngine {
     const wristDist = Math.max(6, len - 8);
     const wx = sx + ux * wristDist;
     const wy = sy + uy * wristDist;
-    const rShoulder = 14.2;
-    const rWrist = 9.4;
-    const pawRx = 14.5 * (1 + squash * 0.14);
-    const pawRy = 11.8 * (1 - squash * 0.12);
+    const rShoulder = s.isDarkBase && s.bellyBibColor ? 13.8 : 15.2;
+    const rWrist = 10.8;
+    const pawRx = 14.8 * (1 + squash * 0.14);
+    const pawRy = 12.0 * (1 - squash * 0.12);
+
+    // Subtle organic plush kitten-arm bow (eliminates stiff straight-stick look!)
+    const bowSide = side === 'left' ? -1 : 1;
+    const bowAmp = Math.min(7.5, len * 0.052);
+    const midX = (sx + wx) * 0.5 + bowSide * bowAmp * Math.abs(uy);
+    const midY = (sy + wy) * 0.5 + bowAmp * 0.45 * Math.abs(ux);
 
     ctx.save();
     const traceArmPath = () => {
       ctx.beginPath();
       ctx.moveTo(sx + nx * rShoulder, sy + ny * rShoulder);
       ctx.quadraticCurveTo(
-        (sx + wx) * 0.5 + nx * (rShoulder * 0.84),
-        (sy + wy) * 0.5 + ny * (rShoulder * 0.84),
+        midX + nx * (rShoulder * 0.86),
+        midY + ny * (rShoulder * 0.86),
         wx + nx * rWrist,
         wy + ny * rWrist,
       );
       ctx.lineTo(wx - nx * rWrist, wy - ny * rWrist);
       ctx.quadraticCurveTo(
-        (sx + wx) * 0.5 - nx * (rShoulder * 0.84),
-        (sy + wy) * 0.5 - ny * (rShoulder * 0.84),
+        midX - nx * (rShoulder * 0.86),
+        midY - ny * (rShoulder * 0.86),
         sx - nx * rShoulder,
         sy - ny * rShoulder,
       );
       ctx.closePath();
     };
 
-    ctx.fillStyle = s.armColor;
-    traceArmPath();
-    ctx.fill();
+    // Match the true rendered flank coat tone (toasted beige on Siamese; orange/charcoal flank patches on Calico!)
+    const calicoPatchTone =
+      s.pattern === 'calico'
+        ? side === 'left'
+          ? (s.maskColor || '#ea9446')
+          : (s.calicoPatchColor || '#3c3634')
+        : null;
+    const flankTone = calicoPatchTone
+      ? calicoPatchTone
+      : s.flankColor
+        ? blendHex(s.furSecondaryColor, s.flankColor, 0.45)
+        : s.furColor;
+    const contrastingArm = s.armColor.toLowerCase() !== s.furColor.toLowerCase();
+    const armGrad = ctx.createLinearGradient(sx, sy, px, py);
+    if (isSmear) {
+      // Soft motion trail ONLY behind moving lower forearm & paw — never a ghost stick on the chest!
+      armGrad.addColorStop(0.0, colorWithAlpha(s.armColor, 0.0));
+      armGrad.addColorStop(0.45, colorWithAlpha(s.armColor, 0.0));
+      armGrad.addColorStop(0.75, colorWithAlpha(s.armColor, 0.56));
+      armGrad.addColorStop(1.0, colorWithAlpha(s.pawColor, 0.84));
+    } else if (calicoPatchTone) {
+      // Calico: upper shoulder flows seamlessly out of the side patch (orange left / charcoal right) into cute white kitten mittens!
+      armGrad.addColorStop(0.0, colorWithAlpha(calicoPatchTone, 0.0));
+      armGrad.addColorStop(0.09, colorWithAlpha(calicoPatchTone, 1.0));
+      armGrad.addColorStop(0.28, colorWithAlpha(calicoPatchTone, 1.0));
+      armGrad.addColorStop(0.46, colorWithAlpha(s.armColor, 1.0));
+      armGrad.addColorStop(1.0, colorWithAlpha(s.armColor, 1.0));
+    } else if (contrastingArm) {
+      // Authentic colourpoint transition (e.g. Siamese): melts invisibly out of toasted flank into smooth espresso stockings & chocolate paws!
+      const midMocha = blendHex(flankTone, s.armColor, 0.55);
+      armGrad.addColorStop(0.0, colorWithAlpha(flankTone, 0.0));
+      armGrad.addColorStop(0.11, colorWithAlpha(flankTone, 1.0));
+      armGrad.addColorStop(0.24, colorWithAlpha(flankTone, 1.0));
+      armGrad.addColorStop(0.56, colorWithAlpha(midMocha, 1.0));
+      armGrad.addColorStop(0.84, colorWithAlpha(s.armColor, 1.0));
+      armGrad.addColorStop(1.0, colorWithAlpha(s.pawColor, 1.0));
+    } else if (s.isDarkBase) {
+      // Dark-coat skins (e.g. Tuxedo): crisp clean shoulder on black flank without soft grey feathering onto white bib!
+      armGrad.addColorStop(0.0, colorWithAlpha(s.armColor, 0.0));
+      armGrad.addColorStop(0.04, colorWithAlpha(s.armColor, 1.0));
+      armGrad.addColorStop(1.0, colorWithAlpha(s.armColor, 1.0));
+    } else {
+      // Same-coat light skins (Orange Tabby, solid): brisk seamless shoulder merge with ZERO body-outline bleed!
+      armGrad.addColorStop(0.0, colorWithAlpha(s.armColor, 0.0));
+      armGrad.addColorStop(0.10, colorWithAlpha(s.armColor, 1.0));
+      armGrad.addColorStop(1.0, colorWithAlpha(s.armColor, 1.0));
+    }
 
-    ctx.beginPath();
-    ctx.arc(sx, sy, rShoulder, 0, Math.PI * 2);
+    ctx.fillStyle = armGrad;
+    traceArmPath();
     ctx.fill();
 
     // Custom arm spots
     const armPart = side === 'left' ? 'leftArm' : 'rightArm';
-    const armSpots = s.spots.filter((sp) => sp.part === armPart);
+    const armSpots = isSmear ? [] : s.spots.filter((sp) => sp.part === armPart);
     if (armSpots.length > 0 && len > 24) {
       const armAng = Math.atan2(dy, dx);
       ctx.save();
@@ -4713,8 +5092,7 @@ export class KuroCatEngine {
       ctx.clip();
       for (const sp of armSpots) {
         const frac = Math.max(0.1, Math.min(0.9, sp.x));
-        ctx.globalAlpha = sp.opacity ?? 0.85;
-        ctx.fillStyle = sp.color;
+        ctx.fillStyle = colorWithAlpha(sp.color, sp.opacity ?? 0.85);
         ctx.beginPath();
         ctx.ellipse(
           sx + ux * (len * frac) + nx * sp.y,
@@ -4732,7 +5110,7 @@ export class KuroCatEngine {
 
     // Mitten paw ball
     ctx.save();
-    if (!s.isDarkBase) {
+    if (!isSmear && !s.isDarkBase) {
       ctx.shadowColor = 'rgba(36, 32, 30, 0.22)';
       ctx.shadowBlur = 4;
       ctx.shadowOffsetY = 1.5;
@@ -4744,38 +5122,54 @@ export class KuroCatEngine {
     ctx.restore();
 
     const edgeColor = s.pawOutlineColor || s.outlineColor;
-    if (edgeColor) {
+    if (!isSmear && edgeColor) {
       ctx.lineWidth = 1.65;
       ctx.lineCap = 'round';
+      const startFrac = withCrease ? 0.22 : 0.16;
       for (const sgn of [-1, 1]) {
-        const startFrac = withCrease ? 0.16 : 0.08;
-        const esx = sx + ux * (len * startFrac) + nx * sgn * (rShoulder * (1 - startFrac * 0.16));
-        const esy = sy + uy * (len * startFrac) + ny * sgn * (rShoulder * (1 - startFrac * 0.16));
-        ctx.strokeStyle = edgeColor;
-        ctx.globalAlpha = 0.85;
+        // Exact de Casteljau subdivision of bowed quadratic arm contour from startFrac..1.0
+        const p0x = sx + nx * sgn * rShoulder;
+        const p0y = sy + ny * sgn * rShoulder;
+        const p1x = midX + nx * sgn * (rShoulder * 0.86);
+        const p1y = midY + ny * sgn * (rShoulder * 0.86);
+        const p2x = wx + nx * sgn * rWrist;
+        const p2y = wy + ny * sgn * rWrist;
+
+        const q0x = p0x + (p1x - p0x) * startFrac;
+        const q0y = p0y + (p1y - p0y) * startFrac;
+        const q1x = p1x + (p2x - p1x) * startFrac;
+        const q1y = p1y + (p2y - p1y) * startFrac;
+        const esx = q0x + (q1x - q0x) * startFrac;
+        const esy = q0y + (q1y - q0y) * startFrac;
+
+        const edgeGrad = ctx.createLinearGradient(esx, esy, p2x, p2y);
+        edgeGrad.addColorStop(0.0, colorWithAlpha(edgeColor, 0.0));
+        edgeGrad.addColorStop(0.28, colorWithAlpha(edgeColor, 0.74));
+        edgeGrad.addColorStop(1.0, colorWithAlpha(edgeColor, 0.90));
+
+        ctx.strokeStyle = edgeGrad;
         ctx.beginPath();
         ctx.moveTo(esx, esy);
-        ctx.quadraticCurveTo(
-          (sx + wx) * 0.5 + nx * sgn * (rShoulder * 0.84),
-          (sy + wy) * 0.5 + ny * sgn * (rShoulder * 0.84),
-          wx + nx * sgn * rWrist,
-          wy + ny * sgn * rWrist,
-        );
+        ctx.quadraticCurveTo(q1x, q1y, p2x, p2y);
         ctx.stroke();
       }
       const pawAng = Math.atan2(dy, dx);
-      ctx.globalAlpha = 0.92;
-      ctx.strokeStyle = edgeColor;
+      ctx.strokeStyle = colorWithAlpha(edgeColor, 0.92);
       ctx.beginPath();
       ctx.ellipse(px, py, pawRx, pawRy, 0, pawAng - Math.PI * 0.62, pawAng + Math.PI * 0.62);
       ctx.stroke();
-    } else if (s.armCreaseColor && withCrease && len > 28) {
+    } else if (!isSmear && s.armCreaseColor && withCrease && len > 28) {
       for (const sgn of [-1, 1]) {
-        const csx = sx + ux * (len * 0.18) + nx * sgn * (rShoulder * 0.86);
-        const csy = sy + uy * (len * 0.18) + ny * sgn * (rShoulder * 0.86);
-        const cex = sx + ux * (len * 0.72) + nx * sgn * (rWrist * 1.02);
-        const cey = sy + uy * (len * 0.72) + ny * sgn * (rWrist * 1.02);
-        ctx.strokeStyle = s.armCreaseColor;
+        const csx = sx + ux * (len * 0.20) + nx * sgn * (rShoulder * 0.86);
+        const csy = sy + uy * (len * 0.20) + ny * sgn * (rShoulder * 0.86);
+        const cex = sx + ux * (len * 0.78) + nx * sgn * (rWrist * 1.02);
+        const cey = sy + uy * (len * 0.78) + ny * sgn * (rWrist * 1.02);
+        const creaseGrad = ctx.createLinearGradient(csx, csy, cex, cey);
+        creaseGrad.addColorStop(0.0, colorWithAlpha(s.armCreaseColor, 0.0));
+        creaseGrad.addColorStop(0.26, colorWithAlpha(s.armCreaseColor, 0.85));
+        creaseGrad.addColorStop(0.84, colorWithAlpha(s.armCreaseColor, 0.72));
+        creaseGrad.addColorStop(1.0, colorWithAlpha(s.armCreaseColor, 0.0));
+        ctx.strokeStyle = creaseGrad;
         ctx.lineWidth = 1.3;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -4806,8 +5200,39 @@ export class KuroCatEngine {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    ctx.strokeStyle = s.armColor;
-    ctx.lineWidth = 20;
+    const calicoPatchTone =
+      s.pattern === 'calico'
+        ? paw.side === 'left'
+          ? (s.maskColor || '#ea9446')
+          : (s.calicoPatchColor || '#3c3634')
+        : null;
+    const flankTone = calicoPatchTone
+      ? calicoPatchTone
+      : s.flankColor
+        ? blendHex(s.furSecondaryColor, s.flankColor, 0.45)
+        : s.furColor;
+    const contrastingArm = s.armColor.toLowerCase() !== s.furColor.toLowerCase();
+    const bentGrad = ctx.createLinearGradient(sh.x, sh.y, cp.x, cp.y);
+    if (calicoPatchTone) {
+      bentGrad.addColorStop(0.0, colorWithAlpha(calicoPatchTone, 0.0));
+      bentGrad.addColorStop(0.16, colorWithAlpha(calicoPatchTone, 1.0));
+      bentGrad.addColorStop(0.45, colorWithAlpha(s.armColor, 1.0));
+      bentGrad.addColorStop(1.0, colorWithAlpha(s.armColor, 1.0));
+    } else if (contrastingArm) {
+      const midMocha = blendHex(flankTone, s.armColor, 0.55);
+      bentGrad.addColorStop(0.0, colorWithAlpha(flankTone, 0.0));
+      bentGrad.addColorStop(0.18, colorWithAlpha(flankTone, 1.0));
+      bentGrad.addColorStop(0.56, colorWithAlpha(midMocha, 1.0));
+      bentGrad.addColorStop(0.86, colorWithAlpha(s.armColor, 1.0));
+      bentGrad.addColorStop(1.0, colorWithAlpha(s.pawColor, 1.0));
+    } else {
+      bentGrad.addColorStop(0.0, colorWithAlpha(s.armColor, 0.0));
+      bentGrad.addColorStop(0.16, colorWithAlpha(s.armColor, 1.0));
+      bentGrad.addColorStop(1.0, colorWithAlpha(s.armColor, 1.0));
+    }
+
+    ctx.strokeStyle = bentGrad;
+    ctx.lineWidth = 21;
     ctx.beginPath();
     ctx.moveTo(sh.x, sh.y);
     ctx.quadraticCurveTo(elbowX, elbowY, cp.x, cp.y);
@@ -4817,8 +5242,7 @@ export class KuroCatEngine {
     for (const sp of s.spots) {
       if (sp.part !== armPart) continue;
       ctx.save();
-      ctx.globalAlpha = alpha * (sp.opacity ?? 0.82);
-      ctx.fillStyle = sp.color;
+      ctx.fillStyle = colorWithAlpha(sp.color, sp.opacity ?? 0.82);
       ctx.beginPath();
       ctx.ellipse((elbowX + cp.x) * 0.5, (elbowY + cp.y) * 0.5, Math.min(8, sp.rx), Math.min(6, sp.ry), -0.3 * sign, 0, Math.PI * 2);
       ctx.fill();
@@ -4827,11 +5251,18 @@ export class KuroCatEngine {
 
     ctx.fillStyle = s.pawColor;
     ctx.beginPath();
-    ctx.ellipse(cp.x, cp.y, 12.5, 11.0, sign * 0.2, 0, Math.PI * 2);
+    ctx.ellipse(cp.x, cp.y, 12.8, 11.2, sign * 0.2, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = s.pawOutlineColor || s.legLineColor;
-    ctx.lineWidth = 1.55;
+    const outlineCol = s.pawOutlineColor || s.legLineColor;
+    const outlineGrad = ctx.createLinearGradient(elbowX, elbowY - 12, cp.x, cp.y + 12);
+    outlineGrad.addColorStop(0.0, colorWithAlpha(outlineCol, 0.0));
+    outlineGrad.addColorStop(0.28, colorWithAlpha(outlineCol, 0.68));
+    outlineGrad.addColorStop(0.86, colorWithAlpha(outlineCol, 0.78));
+    outlineGrad.addColorStop(1.0, colorWithAlpha(outlineCol, 0.35));
+
+    ctx.strokeStyle = outlineGrad;
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(elbowX + sign * 8, elbowY - 16);
     ctx.quadraticCurveTo(elbowX + sign * 4, elbowY + 12, cp.x + sign * 2, cp.y + 10);

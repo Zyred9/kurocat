@@ -48,9 +48,9 @@
 
 ## 📥 直接下载使用（Windows / Win7 / macOS / Linux）
 
-前往 [Releases](https://github.com/qianyiai/kurocat/releases) 页面或直接点击下方最新 **`v4.9.1`** 安装包下载（所有版本均内置 **240Hz 弹簧物理活猫微生态（好奇大圆瞳 / 飞机耳尾巴三连捶桌 / 揣手打瞌睡 Zzz）**、**尾巴拍键 4 模式 + 键盘点选录制**、**独立侧边不挡猫右键菜单**、**内置 OBS 透明直播源（`127.0.0.1:27421/obs` 免抠像）**、**20%–150% 丝滑缩放滑动条**、**65% 紧凑 / 108 全尺寸小键盘** 与 **输密码自动闭眼/捂眼防偷窥** 及 App 内一键自升级）：
+前往 [Releases](https://github.com/qianyiai/kurocat/releases) 页面或直接点击下方最新 **`v5.0.1`** 安装包下载（全新搭载 **✨ 3D 体积光影手办模式 & 🎨 2D 经典手绘双引擎一键切换（默认 3D）**、**2D/3D 短萌手臂与毛色过渡优化**、**可选 3D 项圈铃铛与电竞耳机（支持游戏自动检测静默戴上/摘下，默认均关闭）**、**MCP AI 捏猫斑点 3D/2D 1:1 同步**、**28s 防 1px 微抖动打瞌睡**、**屏幕最顶端无阻自由拖动**、**尾巴拍键 4 模式 + 键盘点选录制**、**独立侧边不挡猫右键菜单**、**内置 OBS 透明直播源（`127.0.0.1:27421/obs` 免抠像）**、**20%–150% 丝滑缩放**、**65% / 108 键** 与 **输密码自动闭眼防偷窥** 及 App 内一键自升级）：
 
-- **🪟 Windows 10 / 11（65% 经典安装版 · `v4.9.1`）**：[**`KuroCat-4.9.1-x64-setup.exe`**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-4.9.1-x64-setup.exe)（约 1.99 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/#download)
+- **🪟 Windows 10 / 11（65% 经典安装版 · `v5.0.1`）**：[**`KuroCat-5.0.1-x64-setup.exe`**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-5.0.1-x64-setup.exe)（2.15 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/#download)
   - 默认 65% 紧凑机械键盘，自动创建桌面 **`KuroCat`** 图标、开始菜单与系统卸载入口；右键或托盘随时一键切换 **108 键全尺寸小键盘**、**🐳 大肥鱼（鲸鱼娘）**、**OBS 透明直播源** 与 App 内一键更新。
   - **常见问题说明**：
     - **Edge / Chrome 浏览器提示「通常不会下载 `.exe`」怎么办？**（开源免费软件未购商业代码签名证书，全量源码公开可放心信任）：
@@ -59,16 +59,16 @@
       - **双击安装若弹出蓝框「Windows 已保护你的电脑」**：点 **「更多信息」** → 点 **「仍要运行」** 即可。
     - 极少数老版 Win10 / LTSC 精简版若提示缺少 `WebView2 Runtime`，安装微软官方 1.8 MB 引导程序（右键「以管理员身份运行」）即可：[`MicrosoftEdgeWebview2Setup.exe`](https://go.microsoft.com/fwlink/p/?LinkId=2124703)。
     - **游戏全屏 / 管理员权限 / OBS 直播提示**：单机与常规游戏在 Win10/11 全屏优化（FSO）或「无边框窗口化」下内置持续 Z 序置顶守卫且绝不抢焦点（建议开启「锁定鼠标穿透」，按 `Alt` 随时解锁）；若游戏本身以管理员权限运行导致无法捕获键鼠，右键系统托盘点击 **「以管理员身份重启（捕获游戏键鼠）」** 即可无缝提权；直播录屏可直接右键小猫或托盘点 **「复制 OBS 透明源地址」**（自动开启本机 `http://127.0.0.1:27421/obs`，OBS 添加浏览器源即享原生 Alpha 透明通道免抠像，支持「仅 OBS 显示」隐藏桌面猫且同步防密码泄露）；玩无畏契约 / 三角洲行动等强内核反作弊网游建议右键托盘开启 **「暂停监听并隐藏（游戏反作弊护航）」**。
-- **🖥️ Windows 7 SP1（64 位专属兼容绿包版 · `v4.9.1`）**：[**`KuroCat-v4.9.1-win7-x64-portable.zip`**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-win7-x64-portable.zip)（178.77 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v4.9.1/KuroCat-v4.9.1-win7-x64-portable.zip)
+- **🖥️ Windows 7 SP1（64 位专属兼容绿包版 · `v5.0.1`）**：[**`KuroCat-v5.0.1-win7-x64-portable.zip`**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-win7-x64-portable.zip)（178.94 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v5.0.1/KuroCat-v5.0.1-win7-x64-portable.zip)
   - 原生 PE 6.01 编译（零 Win8/Win10 DLL 依赖），内置微软官方最后一版支持 Win7 的离线 **WebView2 109.0.1518.78** 运行库，并搭载 **Win7 原生 256 级逐像素透明抗锯齿渲染（`UpdateLayeredWindow`）**，开不开 Aero 均无白底框与锯齿；解压后保持 `KuroCat.exe` 与 `WebView2Runtime` 同目录直接双击即可运行。
-- **🍎 macOS 10.15 Catalina+（Apple Silicon M1–M4 & Intel 通用版 · `v4.9.1`）**：[**`KuroCat-v4.9.1-macos-universal.dmg`**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-macos-universal.dmg)（5.61 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v4.9.1/KuroCat-v4.9.1-macos-universal.dmg)
-  - 打开 `.dmg` 将 `KuroCat.app` 拖入「应用程序」文件夹运行，内置 65% / 108 键切换与全部 7 款皮肤（含 🐳 大肥鱼鲸鱼娘）。
+- **🍎 macOS 10.15 Catalina+（Apple Silicon M1–M4 & Intel 通用版 · `v5.0.1`）**：[**`KuroCat-v5.0.1-macos-universal.dmg`**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-macos-universal.dmg)（5.93 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v5.0.1/KuroCat-v5.0.1-macos-universal.dmg)
+  - 打开 `.dmg` 将 `KuroCat.app` 拖入「应用程序」文件夹运行，内置 3D/2D 切换、65% / 108 键切换与全部 7 款皮肤（含 🐳 大肥鱼鲸鱼娘）。
   - **首次打开说明（开源未公证应用）**：若提示「无法验证开发者」或「已损坏」，在终端执行一次 `xattr -cr /Applications/KuroCat.app` 后即可正常打开（后续 App 内一键升级会自动处理，无需再敲命令）。
   - **键盘与鼠标监听权限**：首次启动会自动弹出系统授权引导，请在「系统设置 → 隐私与安全性」中同时勾选 **「辅助功能」与「输入监控」** 里的 `KuroCat`（即开即生效，兼容 Karabiner-Elements；若覆盖升级后权限未生效，在列表中选中 `KuroCat` 点左下角 `-` 删除再重新 `+` 添加即可）。
   - **macOS Stdio MCP 路径**：`/Applications/KuroCat.app/Contents/MacOS/KuroCat`（参数 `--mcp`），或在桌宠运行时直接连接 `http://127.0.0.1:27420/mcp`。
-- **🐧 Linux / Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+ / UOS（`v4.9.1`）**：
-  - **x86_64（Intel / AMD / 兆芯 / 海光）**：[**`.deb`（2.23 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-linux-amd64.deb) · [**`.AppImage`（77.37 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-linux-amd64.AppImage)
-  - **ARM64（飞腾 / 鲲鹏 / 树莓派）**：[**`.deb`（2.19 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-linux-arm64.deb) · [**`.AppImage`（75.53 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-linux-arm64.AppImage)
+- **🐧 Linux / Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+ / UOS（`v5.0.1`）**：
+  - **x86_64（Intel / AMD / 兆芯 / 海光）**：[**`.deb`（2.38 MB）**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-linux-amd64.deb) · [**`.AppImage`（77.52 MB）**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-linux-amd64.AppImage)
+  - **ARM64（飞腾 / 鲲鹏 / 树莓派）**：[**`.deb`（2.34 MB）**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-linux-arm64.deb) · [**`.AppImage`（75.69 MB）**](https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-linux-arm64.AppImage)
   - **系统要求说明**：基于 Tauri v2 + Ubuntu 22.04 基线构建，需要 **`glibc >= 2.34`** 且（`.deb` 版）依赖 **`libwebkit2gtk-4.1-0`** 与 **`libayatana-appindicator3-1`**（适用于 Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+ 等发行版；**暂不支持基于 Ubuntu 20.04 / `glibc 2.31` / `webkit2gtk-4.0` 的银河麒麟 V10 SP1**）。
   - 原生动态加载 X11 `XRecord`（免 root 捕获全局键鼠，Wayland 自动支持 `evdev` 回退），官网亦提供全部国内高速镜像：[`https://qianyi.one/kurocat/#linux-download`](https://qianyi.one/kurocat/#linux-download)。
 
@@ -165,6 +165,20 @@ npm install
 npm run tauri:dev      # 本地热更新调试
 npm run tauri:build    # 编译 Release 可执行文件与安装包
 ```
+
+### macOS 发布签名（升级后保留系统权限）
+
+macOS 按代码签名记住 KuroCat 的「辅助功能」和「输入监控」授权。临时签名（ad hoc）每个版本都不同，用户升级后必须重新授权；每次发版都用同一张代码签名证书签名，授权就能保留。自签名证书即可，不需要 Apple 开发者账号。维护者只需配置一次：
+
+```bash
+scripts/macos-codesign.sh create-cert /path/outside/repo/kurocat-signing
+gh secret set MACOS_SIGNING_CERT_P12_BASE64 < /path/outside/repo/kurocat-signing/kurocat-signing.p12.base64
+gh secret set MACOS_SIGNING_CERT_PASSWORD < /path/outside/repo/kurocat-signing/kurocat-signing.password
+```
+
+发布流程会用这张证书给 macOS 包签名，并检查 DMG 和自动更新包里的 App。请备份证书和密码，之后每个版本都要用它签名，换证书后用户需要重新授权。
+
+这两个 Secrets 是可选的：都不配置时，发布照常完成，macOS 包会补上完整的临时签名，安装后权限可以正常生效，只是用户升级后仍要重新授权，Actions 日志里会给出提示。只配置了一个、证书无法导入或密码不对时，发布会失败并提示原因；修正 Secrets，或者把两个都删掉退回临时签名即可。自签名证书不能代替 Apple 公证，首次打开时仍需在「隐私与安全性」里允许运行。
 
 ## 📄 开源协议与致谢
 

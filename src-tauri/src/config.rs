@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn default_cat_breed() -> String {
     "black".to_string()
@@ -28,6 +29,43 @@ fn default_obs_port() -> u16 {
 
 fn default_obs_hide_pet() -> bool {
     false
+}
+
+pub fn default_render_mode() -> String {
+    "3d".to_string()
+}
+
+pub fn normalize_render_mode(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "2d" => "2d".to_string(),
+        _ => "3d".to_string(),
+    }
+}
+
+pub fn default_collar_color() -> String {
+    "none".to_string()
+}
+
+pub fn normalize_collar_color(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "red" => "red".to_string(),
+        "blue" => "blue".to_string(),
+        "pink" => "pink".to_string(),
+        "green" => "green".to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+pub fn default_headphone_mode() -> String {
+    "off".to_string()
+}
+
+pub fn normalize_headphone_mode(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "auto" => "auto".to_string(),
+        "on" => "on".to_string(),
+        _ => "off".to_string(),
+    }
 }
 
 pub fn default_keyboard_layout() -> String {
@@ -139,6 +177,12 @@ pub struct AppSettings {
     pub obs_port: u16,
     #[serde(default = "default_obs_hide_pet")]
     pub obs_hide_pet: bool,
+    #[serde(default = "default_render_mode")]
+    pub render_mode: String,
+    #[serde(default = "default_collar_color")]
+    pub collar_color: String,
+    #[serde(default = "default_headphone_mode")]
+    pub headphone_mode: String,
 }
 
 impl Default for AppSettings {
@@ -167,6 +211,9 @@ impl Default for AppSettings {
             obs_enabled: default_obs_enabled(),
             obs_port: default_obs_port(),
             obs_hide_pet: default_obs_hide_pet(),
+            render_mode: default_render_mode(),
+            collar_color: default_collar_color(),
+            headphone_mode: default_headphone_mode(),
         }
     }
 }
@@ -208,6 +255,9 @@ pub fn load_settings() -> AppSettings {
             parsed.scale = parsed.scale.clamp(0.20, 1.50);
             parsed.tail_key_mode = normalize_tail_key_mode(&parsed.tail_key_mode);
             parsed.tail_key_ids = normalize_tail_key_ids(&parsed.tail_key_ids);
+            parsed.render_mode = normalize_render_mode(&parsed.render_mode);
+            parsed.collar_color = normalize_collar_color(&parsed.collar_color);
+            parsed.headphone_mode = normalize_headphone_mode(&parsed.headphone_mode);
             return parsed;
         }
     }
@@ -215,13 +265,23 @@ pub fn load_settings() -> AppSettings {
 }
 
 pub fn save_settings(settings: &AppSettings) {
+    let _ = try_save_settings(settings);
+}
+
+pub fn try_save_settings(settings: &AppSettings) -> std::io::Result<()> {
+    static NEXT_WRITE: AtomicUsize = AtomicUsize::new(0);
     let path = config_path();
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        fs::create_dir_all(parent)?;
     }
-    if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = fs::write(path, json);
+    let json = serde_json::to_string_pretty(settings).map_err(std::io::Error::other)?;
+    let write_id = NEXT_WRITE.fetch_add(1, Ordering::Relaxed);
+    let temporary_path = path.with_extension(format!("json.{}.{write_id}.tmp", std::process::id()));
+    let result = fs::write(&temporary_path, json).and_then(|()| fs::rename(&temporary_path, path));
+    if result.is_err() {
+        let _ = fs::remove_file(temporary_path);
     }
+    result
 }
 
 #[cfg(windows)]

@@ -59,7 +59,7 @@
         "description": "Lightweight, transparent, always-on-top open-source desktop typing & mouse cat companion built with Tauri v2 and Rust. Features 6 hand-crafted cats + BigFish whale-girl, 65%/108-key layouts, customizable tail-key patting, native OBS transparent browser source, automatic password privacy guard, and a built-in MCP server for AI cat creation.",
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": "Windows 11, Windows 10, Windows 7, macOS, Linux, Android",
-        "softwareVersion": "4.9.1",
+        "softwareVersion": "5.0.1",
         "url": "https://qianyi.one/kurocat/",
         "downloadUrl": "https://qianyi.one/kurocat/#download",
         "codeRepository": "https://github.com/qianyiai/kurocat",
@@ -109,7 +109,7 @@
         <a class="brand-current" href="#top">
           <img class="nav-icon" src="/kurocat/assets/kurocat-icon.png" alt="KuroCat" width="20" height="20" />
           <span>KuroCat</span>
-          <span class="ver-pill" id="nav-ver-pill">v4.9.1</span>
+          <span class="ver-pill" id="nav-ver-pill">v5.0.1</span>
         </a>
       </div>
       <div class="nav-right">
@@ -140,7 +140,7 @@
             <div class="eyebrow" style="margin-bottom:4px;" data-i18n="hero.eyebrow">Windows · macOS · Linux · Open Source</div>
             <div class="hero-meta-line">
               <span class="live-dot"></span>
-              <span id="hero-release-label">最新版本 v4.9.1</span>
+              <span id="hero-release-label">最新版本 v5.0.1</span>
               <span class="meta-divider" id="github-stats-sep" style="display:none;">·</span>
               <span id="github-stats-text" style="display:none;"></span>
             </div>
@@ -153,14 +153,14 @@
         </h1>
 
         <p class="hero-sub" data-i18n-html="hero.sub">
-          基于 <strong>Tauri v2 + Rust 原生钩子 + Canvas 2D</strong> 打造的透明置顶桌面键鼠伴侣。
-          零外部依赖、约 24 MB 轻量常驻；内置 <strong>6 款手绘猫咪 + 🐳 大肥鱼（鲸鱼娘）</strong>、<strong>自定义尾巴拍键</strong>、<strong>OBS 原生透明直播源</strong>、<strong>输密码自动闭眼/捂眼防偷窥</strong> 与 <strong>原生 MCP 协议</strong>，发张照片就能让 AI 一句话捏出你家的猫。
+          基于 <strong>Tauri v2 + Rust 原生钩子 + Three.js 3D / Canvas 2D 双引擎</strong> 打造的透明置顶桌面键鼠伴侣。
+          默认 <strong>✨ 3D 体积光影手办模式</strong>（可一键切换 <strong>2D 经典手绘</strong>），安装包仅 <strong>2.15 MB</strong>；内置 <strong>6 款猫咪 + 🐳 大肥鱼（鲸鱼娘）</strong>、<strong>游戏自动戴电竞耳机</strong>、<strong>3D 项圈铃铛</strong>、<strong>自定义尾巴拍键</strong>、<strong>OBS 免抠像直播源</strong>、<strong>输密码自动闭眼防偷窥</strong> 与 <strong>MCP 协议 AI 捏猫</strong>（3D/2D 同步斑点）。
         </p>
 
         <div class="hero-actions">
-          <a class="btn-lime" id="hero-primary-dl" href="/kurocat/releases/v4.9.1/KuroCat-4.9.1-x64-setup.exe" download>
+          <a class="btn-lime" id="hero-primary-dl" href="/kurocat/releases/v5.0.1/KuroCat-5.0.1-x64-setup.exe" download>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2v7.6m0 0L4.8 6.6M8 9.8l3.2-3.2M2.5 12.8h11" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span id="hero-primary-dl-label">免费下载 Windows 版（1.99 MB）</span>
+            <span id="hero-primary-dl-label">免费下载 Windows 版（2.15 MB）</span>
           </a>
           <a class="btn-outline" href="#download" data-i18n="hero.allPlatforms">全部平台与版本</a>
           <a class="btn-ghost" href="https://github.com/qianyiai/kurocat" target="_blank" rel="noopener" data-i18n="hero.ghSource">
@@ -170,7 +170,7 @@
 
         <div class="hero-specs">
           <div class="hero-spec-item">
-            <div class="spec-val">1.99 MB</div>
+            <div class="spec-val">2.15 MB</div>
             <div class="spec-lbl" data-i18n="hero.spec1Lbl">原生 Rust 安装包体积</div>
           </div>
           <div class="hero-spec-item">
@@ -191,14 +191,21 @@
             <div class="dots"><i></i><i></i><i></i></div>
             <span class="playground-title" data-i18n="pg.title">实时网页引擎 · 直接敲键盘或摸猫头</span>
           </div>
-          <div class="backdrop-pills" role="group" aria-label="预览桌布背景">
-            <button class="mini-pill active" data-backdrop="dark" type="button" data-i18n="pg.bgDark">深色桌布</button>
-            <button class="mini-pill" data-backdrop="light" type="button" data-i18n="pg.bgLight">浅色桌布</button>
+          <div class="playground-bar-right">
+            <div class="backdrop-pills web-mode-pills" role="group" aria-label="3D / 2D 模式切换">
+              <button class="mini-pill active" data-web-rendermode="3d" type="button">✨ 3D 立体</button>
+              <button class="mini-pill" data-web-rendermode="2d" type="button">🎨 2D 经典</button>
+            </div>
+            <div class="backdrop-pills" role="group" aria-label="预览桌布背景">
+              <button class="mini-pill active" data-backdrop="dark" type="button" data-i18n="pg.bgDark">深色桌布</button>
+              <button class="mini-pill" data-backdrop="light" type="button" data-i18n="pg.bgLight">浅色桌布</button>
+            </div>
           </div>
         </div>
 
         <div class="canvas-viewport backdrop-dark" id="canvas-viewport">
-          <canvas id="kurocat-canvas" aria-label="KuroCat 实时交互试玩画布"></canvas>
+          <canvas id="kurocat-canvas" aria-label="KuroCat 2D 实时交互试玩画布"></canvas>
+          <canvas id="kurocat-canvas-3d" class="hidden" aria-label="KuroCat 3D 实时交互试玩画布"></canvas>
           <div class="stage-hint" id="stage-hint">
             <span data-i18n="pg.hintKey">⌨️ 敲键盘</span>
             <span data-i18n="pg.hintMouse">🖱️ 点左/右键</span>
@@ -247,6 +254,20 @@
               <button class="chip-btn" id="btn-sleep-demo" type="button" title="触发趴下打瞌睡冒 Zzz（敲任意键抖头醒来）" data-i18n="pg.btnSleep" data-i18n-title="pg.sleepTitle">💤 打瞌睡</button>
               <button class="chip-btn active" id="btn-bubbles" type="button" title="开关悬浮按键气泡" data-i18n="pg.btnBubbles" data-i18n-title="pg.bubblesTitle">💬 气泡</button>
               <button class="chip-btn active" id="btn-purr" type="button" title="开关摸头呼噜声" data-i18n="pg.btnPurr" data-i18n-title="pg.purrTitle">🔊 呼噜</button>
+              <button class="chip-btn" id="btn-web-headphones" type="button" title="开关电竞耳机（桌面端支持检测到游戏自动戴上）">🎧 电竞耳机</button>
+              <button class="chip-btn" id="btn-web-orbit" type="button" title="开启后在画布上拖动可 360° 旋转查看 3D 立体模型">🔄 360° 旋转</button>
+            </div>
+          </div>
+
+          <!-- Row 2.2: Optional 3D Collar & Bell -->
+          <div class="dock-row" id="web-collar-row">
+            <span class="dock-label">3D 项圈</span>
+            <div class="seg-control" role="group" aria-label="3D 项圈铃铛颜色">
+              <button class="seg-btn active" data-web-collar="none" type="button">无</button>
+              <button class="seg-btn" data-web-collar="red" type="button">🔴 红</button>
+              <button class="seg-btn" data-web-collar="blue" type="button">🔵 蓝</button>
+              <button class="seg-btn" data-web-collar="pink" type="button">🩷 粉</button>
+              <button class="seg-btn" data-web-collar="green" type="button">🟢 绿</button>
             </div>
           </div>
 
@@ -307,14 +328,14 @@
             开箱即 65% 紧凑机械键盘，自动创建桌面 <code>KuroCat</code> 图标、开始菜单与系统卸载入口；右键随时可一键切换 <strong>108 键全尺寸小键盘</strong>与内置自更新。
           </p>
           <div class="dl-meta">
-            <span class="dl-filename" data-asset-name="win65">KuroCat-4.9.1-x64-setup.exe</span>
-            <span class="dl-size" data-asset-size="win65">1.99 MB</span>
+            <span class="dl-filename" data-asset-name="win65">KuroCat-5.0.1-x64-setup.exe</span>
+            <span class="dl-size" data-asset-size="win65">2.15 MB</span>
           </div>
           <div class="dl-actions">
-            <a class="btn-lime btn-full" data-dl-primary="win65" href="/kurocat/releases/v4.9.1/KuroCat-4.9.1-x64-setup.exe" download data-i18n="dl.primaryBtn">
+            <a class="btn-lime btn-full" data-dl-primary="win65" href="/kurocat/releases/v5.0.1/KuroCat-5.0.1-x64-setup.exe" download data-i18n="dl.primaryBtn">
               高速直链下载
             </a>
-            <a class="dl-alt-link" data-dl-gh="win65" href="https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-4.9.1-x64-setup.exe" target="_blank" rel="noopener" data-i18n="dl.ghBtn">
+            <a class="dl-alt-link" data-dl-gh="win65" href="https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-5.0.1-x64-setup.exe" target="_blank" rel="noopener" data-i18n="dl.ghBtn">
               GitHub 官方源 ›
             </a>
           </div>
@@ -336,14 +357,14 @@
             原生编译 ARM64 + x86_64 通用镜像，兼容 M1/M2/M3/M4 与老款 Intel Mac（macOS 10.15 Catalina 及以上），内置 65% / 108 键、6 款猫咪与大肥鱼皮肤。打开 <code>.dmg</code> 拖入「应用程序」即可运行。
           </p>
           <div class="dl-meta">
-            <span class="dl-filename" data-asset-name="macos">KuroCat-v4.9.1-macos-universal.dmg</span>
-            <span class="dl-size" data-asset-size="macos">5.61 MB</span>
+            <span class="dl-filename" data-asset-name="macos">KuroCat-v5.0.1-macos-universal.dmg</span>
+            <span class="dl-size" data-asset-size="macos">5.97 MB</span>
           </div>
           <div class="dl-actions">
-            <a class="btn-solid btn-full" data-dl-primary="macos" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-macos-universal.dmg" download data-i18n="dl.primaryBtn">
+            <a class="btn-solid btn-full" data-dl-primary="macos" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-macos-universal.dmg" download data-i18n="dl.primaryBtn">
               高速直链下载
             </a>
-            <a class="dl-alt-link" data-dl-gh="macos" href="https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-macos-universal.dmg" target="_blank" rel="noopener" data-i18n="dl.ghBtn">
+            <a class="dl-alt-link" data-dl-gh="macos" href="https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-macos-universal.dmg" target="_blank" rel="noopener" data-i18n="dl.ghBtn">
               GitHub 官方源 ›
             </a>
           </div>
@@ -398,10 +419,10 @@
           </p>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-          <a class="btn-outline" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-win7-x64-portable.zip" download style="white-space:nowrap;" data-i18n="dl.win7Btn">
-            下载 Win7 兼容绿包版（178.77 MB）
+          <a class="btn-outline" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-win7-x64-portable.zip" download style="white-space:nowrap;" data-i18n="dl.win7Btn">
+            下载 Win7 兼容绿包版（178.99 MB）
           </a>
-          <a class="dl-alt-link" href="https://github.com/qianyiai/kurocat/releases/download/v4.9.1/KuroCat-v4.9.1-win7-x64-portable.zip" target="_blank" rel="noopener" style="font-size:12px;" data-i18n="dl.win7Gh">
+          <a class="dl-alt-link" href="https://github.com/qianyiai/kurocat/releases/download/v5.0.1/KuroCat-v5.0.1-win7-x64-portable.zip" target="_blank" rel="noopener" style="font-size:12px;" data-i18n="dl.win7Gh">
             GitHub 官方源（Win7 绿包）›
           </a>
         </div>
@@ -414,21 +435,21 @@
           <p class="tip-body" data-i18n-html="dl.linuxBody">
             原生支持 X11 全局键鼠监听（免 root）与 Wayland <code>evdev</code> 降级、透明无边框置顶、鼠标穿透（按住 <code>Alt</code> 临时拖动）及开机自启。
             需要 <strong><code>glibc &gt;= 2.34</code></strong>（基于 Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+，暂不支持基于 Ubuntu 20.04 / <code>glibc 2.31</code> 的银河麒麟 V10 SP1）。
-            优先推荐下载轻量 <strong>.deb 安装包（2.2 MB）</strong>（需 <code>libwebkit2gtk-4.1-0</code>，双击或 <code>sudo apt install ./KuroCat-*.deb</code>）；无管理员权限可直接运行 <strong>.AppImage 绿色版</strong>（<code>chmod +x</code> 后双击）。
+            优先推荐下载轻量 <strong>.deb 安装包（2.4 MB）</strong>（需 <code>libwebkit2gtk-4.1-0</code>，双击或 <code>sudo apt install ./KuroCat-*.deb</code>）；无管理员权限可直接运行 <strong>.AppImage 绿色版</strong>（<code>chmod +x</code> 后双击）。
           </p>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;">
-            <a class="btn-outline" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-linux-amd64.deb" download style="white-space:nowrap;">
-              x86_64 .deb（2.23 MB）
+            <a class="btn-outline" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-linux-amd64.deb" download style="white-space:nowrap;">
+              x86_64 .deb（2.39 MB）
             </a>
-            <a class="btn-outline" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-linux-arm64.deb" download style="white-space:nowrap;" data-i18n="dl.linuxArmDeb">
-              ARM64 飞腾/麒麟 .deb（2.19 MB）
+            <a class="btn-outline" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-linux-arm64.deb" download style="white-space:nowrap;" data-i18n="dl.linuxArmDeb">
+              ARM64 飞腾/麒麟 .deb（2.35 MB）
             </a>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:flex-end;font-size:12px;">
-            <a class="dl-alt-link" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-linux-amd64.AppImage" download>x86_64 AppImage（77 MB）›</a>
-            <a class="dl-alt-link" href="/kurocat/releases/v4.9.1/KuroCat-v4.9.1-linux-arm64.AppImage" download>ARM64 AppImage（76 MB）›</a>
+            <a class="dl-alt-link" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-linux-amd64.AppImage" download>x86_64 AppImage（77.53 MB）›</a>
+            <a class="dl-alt-link" href="/kurocat/releases/v5.0.1/KuroCat-v5.0.1-linux-arm64.AppImage" download>ARM64 AppImage（75.70 MB）›</a>
           </div>
         </div>
       </div>
@@ -449,7 +470,7 @@
     <!-- Features Showcase -->
     <section class="section-block reveal visible" id="features">
       <div class="section-header">
-        <div class="eyebrow">Crafted Every Pixel · v4.9.1</div>
+        <div class="eyebrow">Crafted Every Pixel · v5.0.1</div>
         <h2 class="section-title" data-i18n="feat.title">把桌宠，做到强迫症级别的丝滑</h2>
       </div>
 

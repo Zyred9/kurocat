@@ -2,6 +2,7 @@
 
 mod cats;
 mod config;
+mod game_detect;
 mod input_hook;
 #[cfg(target_os = "macos")]
 mod macos_window;
@@ -22,9 +23,9 @@ use cats::{all_cats, cat_exists, cats_path, sanitize_cat_id, CatSkinConfig};
 use config::{
     config_path, load_settings, normalize_keyboard_layout, normalize_keyboard_orientation,
     normalize_tail_key_ids, normalize_tail_key_mode, save_settings, set_windows_autostart,
-    AppSettings,
+    try_save_settings, AppSettings,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -34,8 +35,12 @@ pub const BASE_WIDTH: f64 = 420.0;
 pub const BASE_HEIGHT: f64 = 440.0;
 pub const BASE_WIDTH_108: f64 = 540.0;
 pub const BASE_HEIGHT_108: f64 = 456.0;
-pub const MIN_WINDOW_WIDTH: f64 = 260.0;
-pub const MIN_WINDOW_HEIGHT: f64 = 410.0;
+pub const MIN_WINDOW_WIDTH: f64 = 100.0;
+pub const MIN_WINDOW_HEIGHT: f64 = 100.0;
+#[cfg(windows)]
+pub const WIN7_MIN_WINDOW_WIDTH: f64 = 260.0;
+#[cfg(windows)]
+pub const WIN7_MIN_WINDOW_HEIGHT: f64 = 410.0;
 
 pub fn base_dimensions(layout: &str) -> (f64, f64) {
     if layout == "108" {
@@ -48,10 +53,49 @@ pub fn base_dimensions(layout: &str) -> (f64, f64) {
 pub fn window_dimensions(layout: &str, scale: f64) -> (f64, f64) {
     let (bw, bh) = base_dimensions(layout);
     let s = scale.clamp(0.20, 1.50);
+    #[cfg(windows)]
+    let (min_w, min_h) = if win_needs_win7_ulw() {
+        (WIN7_MIN_WINDOW_WIDTH, WIN7_MIN_WINDOW_HEIGHT)
+    } else {
+        (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+    };
+    #[cfg(not(windows))]
+    let (min_w, min_h) = (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
     (
-        (bw * s).round().max(MIN_WINDOW_WIDTH),
-        (bh * s).round().max(MIN_WINDOW_HEIGHT),
+        (bw * s).round().max(min_w),
+        (bh * s).round().max(min_h),
     )
+}
+
+/// Clamps a dragged pet window's top-left physical position against the virtual desktop bounds
+/// while explicitly allowing the transparent headspace above the cat's ears (~17% of window height)
+/// to slide above the screen top edge (`y < v_top`), so the cat itself can reach the very top bezel
+/// without ever getting lost off-screen.
+fn clamp_pet_drag_position(
+    x: i32,
+    y: i32,
+    win_w: i32,
+    win_h: i32,
+    v_left: i32,
+    v_top: i32,
+    v_width: i32,
+    v_height: i32,
+) -> (i32, i32) {
+    let v_right = v_left + v_width.max(320);
+    let v_bottom = v_top + v_height.max(240);
+
+    // Transparent visual padding around the cat/keyboard inside the window:
+    // ~17% empty air above the ears/headset, ~10% side margins, ~8% below keyboard.
+    let top_headroom = ((win_h as f64) * 0.17).round() as i32;
+    let side_margin = ((win_w as f64) * 0.10).round() as i32;
+    let min_visible_h = ((win_h as f64) * 0.68).round() as i32;
+
+    let min_x = v_left - side_margin;
+    let max_x = (v_right - win_w + side_margin).max(min_x);
+    let min_y = v_top - top_headroom;
+    let max_y = (v_bottom - min_visible_h).max(min_y);
+
+    (x.clamp(min_x, max_x), y.clamp(min_y, max_y))
 }
 
 fn resize_window_anchored_bottom_right(
@@ -211,6 +255,8 @@ pub fn run_mcp_stdio() {
 pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
     pub menu_open: Arc<AtomicBool>,
+    tail_picker_bounds: Arc<Mutex<Option<TailPickerBounds>>>,
+    desktop_3d_active: Arc<AtomicBool>,
     pub menu_creating: Arc<AtomicBool>,
     pub menu_opened_at: Arc<Mutex<Instant>>,
     pub dragging: Arc<AtomicBool>,
@@ -229,6 +275,14 @@ struct WindowCursorInfo {
     alt_override: bool,
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TailPickerBounds {
+    toolbar: [f64; 4],
+    keyboard: [f64; 4],
+    close_button: [f64; 4],
+}
+
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> AppSettings {
     state.settings.lock().unwrap().clone()
@@ -237,6 +291,11 @@ fn get_settings(state: State<'_, AppState>) -> AppSettings {
 #[tauri::command]
 fn get_cats() -> Vec<CatSkinConfig> {
     all_cats()
+}
+
+#[tauri::command]
+fn get_game_active() -> bool {
+    game_detect::is_game_active()
 }
 
 #[tauri::command]
@@ -279,6 +338,9 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     patch.keyboard_orientation = normalize_keyboard_orientation(&patch.keyboard_orientation);
     patch.tail_key_mode = normalize_tail_key_mode(&patch.tail_key_mode);
     patch.tail_key_ids = normalize_tail_key_ids(&patch.tail_key_ids);
+    patch.render_mode = config::normalize_render_mode(&patch.render_mode);
+    patch.collar_color = config::normalize_collar_color(&patch.collar_color);
+    patch.headphone_mode = config::normalize_headphone_mode(&patch.headphone_mode);
 
     let (prev_autostart, prev_scale, prev_layout, prev_obs_hide) = {
         let s = state.settings.lock().unwrap();
@@ -616,8 +678,167 @@ fn set_menu_open(state: State<'_, AppState>, open: bool) {
 }
 
 #[tauri::command]
+fn set_tail_picker_bounds(state: State<'_, AppState>, bounds: Option<TailPickerBounds>) {
+    *state.tail_picker_bounds.lock().unwrap() = bounds;
+}
+
+#[tauri::command]
+fn set_desktop_3d_active(state: State<'_, AppState>, active: bool) {
+    state.desktop_3d_active.store(active, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn save_tail_picker_selection(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key_ids: Vec<String>,
+) -> Result<AppSettings, String> {
+    let updated = {
+        let mut settings = state.settings.lock().unwrap();
+        let mut updated = settings.clone();
+        updated.tail_key_mode = "custom".to_string();
+        updated.tail_key_ids = normalize_tail_key_ids(&key_ids);
+        try_save_settings(&updated).map_err(|error| format!("保存自定义尾巴按键失败: {error}"))?;
+        *settings = updated.clone();
+        updated
+    };
+    let _ = app.emit("kuro-settings", updated.clone());
+    Ok(updated)
+}
+
+#[tauri::command]
 fn set_dragging(state: State<'_, AppState>, dragging: bool) {
     state.dragging.store(dragging, Ordering::Relaxed);
+}
+
+/// Native 120Hz unclamped pointer drag on Windows:
+/// Bypasses Windows' `WM_NCLBUTTONDOWN(HTCAPTION)` titlebar drag loop so Aero Snap never fights
+/// the user and the transparent headspace above the cat's ears can smoothly slide above `y = 0`,
+/// allowing the cat itself to reach the very top edge of any monitor cleanly.
+/// Returns `true` when handled natively (Windows); `false` on other platforms so the frontend
+/// falls back to Tauri's `startDragging()`.
+#[tauri::command]
+async fn start_pet_drag(app: AppHandle) -> bool {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetCursorPos, GetSystemMetrics, SetWindowPos, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+            SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
+        let Some(win) = app.get_webview_window("main") else {
+            return false;
+        };
+        let is_win7 = win_needs_win7_ulw();
+        let hwnd_raw: isize = match win.hwnd() {
+            Ok(h) => h.0 as isize,
+            Err(_) => return false,
+        };
+        let (start_wx, start_wy, win_w, win_h) = if is_win7 {
+            match win7_layered::get_rect() {
+                Some((x, y, w, h)) => (x, y, w, h),
+                None => return false,
+            }
+        } else {
+            let Ok(pos) = win.outer_position() else {
+                return false;
+            };
+            let Ok(sz) = win.outer_size() else {
+                return false;
+            };
+            (pos.x, pos.y, sz.width as i32, sz.height as i32)
+        };
+
+        let mut start_pt = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut start_pt) } == 0 {
+            return false;
+        }
+        let offset_x = start_pt.x - start_wx;
+        let offset_y = start_pt.y - start_wy;
+
+        let state = app.state::<AppState>();
+        state.dragging.store(true, Ordering::Relaxed);
+        let dragging_flag = state.dragging.clone();
+
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let mut last_x = start_wx;
+            let mut last_y = start_wy;
+            let hwnd = hwnd_raw as windows_sys::Win32::Foundation::HWND;
+
+            loop {
+                let lbtn_down = unsafe { (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0 };
+                if !lbtn_down {
+                    break;
+                }
+                let mut pt = POINT { x: 0, y: 0 };
+                if unsafe { GetCursorPos(&mut pt) } != 0 {
+                    let (v_left, v_top, v_w, v_h) = unsafe {
+                        (
+                            GetSystemMetrics(SM_XVIRTUALSCREEN),
+                            GetSystemMetrics(SM_YVIRTUALSCREEN),
+                            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                        )
+                    };
+                    let (nx, ny) = clamp_pet_drag_position(
+                        pt.x - offset_x,
+                        pt.y - offset_y,
+                        win_w,
+                        win_h,
+                        v_left,
+                        v_top,
+                        v_w,
+                        v_h,
+                    );
+                    if nx != last_x || ny != last_y {
+                        last_x = nx;
+                        last_y = ny;
+                        if is_win7 {
+                            win7_layered::set_position(nx, ny);
+                            if win7_layered::is_overlay_active() {
+                                unsafe {
+                                    SetWindowPos(
+                                        hwnd,
+                                        std::ptr::null_mut(),
+                                        nx,
+                                        ny,
+                                        0,
+                                        0,
+                                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                                    );
+                                }
+                            }
+                        } else {
+                            unsafe {
+                                SetWindowPos(
+                                    hwnd,
+                                    std::ptr::null_mut(),
+                                    nx,
+                                    ny,
+                                    0,
+                                    0,
+                                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                                );
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(8));
+            }
+            dragging_flag.store(false, Ordering::Relaxed);
+        })
+        .await;
+
+        save_window_pos(app);
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        false
+    }
 }
 
 #[tauri::command]
@@ -1342,8 +1563,12 @@ fn win_wait_for_previous_pid_if_requested() {
     }
 }
 
-fn is_over_interactive_silhouette(rx: f64, ry: f64, is_108: bool, is_big_fish: bool) -> (bool, bool) {
-    let has_relocated_mouse = is_108 && !is_big_fish;
+fn is_over_interactive_silhouette(
+    rx: f64,
+    ry: f64,
+    is_108: bool,
+    has_relocated_mouse: bool,
+) -> (bool, bool) {
     // The relocated mouse is interactive and has no petting response.
     if has_relocated_mouse && rx >= 0.26 && rx <= 0.39 && ry >= 0.515 && ry <= 0.672 {
         return (true, false);
@@ -1355,7 +1580,7 @@ fn is_over_interactive_silhouette(rx: f64, ry: f64, is_108: bool, is_big_fish: b
     let dy_cat = (ry - 0.49) / 0.27;
     let over_cat = (dx_cat * dx_cat + dy_cat * dy_cat) <= 1.0;
 
-    // The compact and Big Fish layouts keep the mouse beside the keyboard.
+    // The other layouts keep the mouse beside the keyboard.
     let over_desk = if has_relocated_mouse {
         rx >= 0.125 && rx <= 0.92 && ry >= 0.65 && ry <= 0.94
     } else if is_108 {
@@ -1367,6 +1592,86 @@ fn is_over_interactive_silhouette(rx: f64, ry: f64, is_108: bool, is_big_fish: b
     (over_cat || over_desk, over_cat)
 }
 
+fn tail_picker_captures_cursor(
+    bounds: Option<TailPickerBounds>,
+    rx: f64,
+    ry: f64,
+    allow_keyboard: bool,
+) -> bool {
+    let Some(bounds) = bounds else {
+        return false;
+    };
+    let contains = |[left, top, right, bottom]: [f64; 4]| {
+        (left..=right).contains(&rx) && (top..=bottom).contains(&ry)
+    };
+    if contains(bounds.toolbar) || (allow_keyboard && contains(bounds.keyboard)) {
+        return true;
+    }
+
+    let [left, top, right, bottom] = bounds.close_button;
+    let radius_x = (right - left) * 0.5;
+    let radius_y = (bottom - top) * 0.5;
+    // The close button is circular in screen pixels, with separate radii in normalized space.
+    radius_x > 0.0
+        && radius_y > 0.0
+        && ((rx - left - radius_x) / radius_x).powi(2)
+            + ((ry - top - radius_y) / radius_y).powi(2)
+            <= 1.0
+}
+
+#[cfg(test)]
+mod hit_test_geometry_tests {
+    use super::{is_over_interactive_silhouette, tail_picker_captures_cursor, TailPickerBounds};
+
+    #[test]
+    fn relocated_mouse_changes_only_the_opted_in_108_key_geometry() {
+        let new_x = 176.0 / 540.0;
+        let new_y = 270.0 / 456.0;
+        assert_eq!(
+            is_over_interactive_silhouette(new_x, new_y, true, true),
+            (true, false),
+        );
+        assert_eq!(
+            is_over_interactive_silhouette(new_x, new_y, true, false),
+            (true, true),
+        );
+
+        let old_x = 46.0 / 540.0;
+        let old_y = 342.0 / 456.0;
+        assert_eq!(
+            is_over_interactive_silhouette(old_x, old_y, true, true),
+            (false, false),
+        );
+        assert_eq!(
+            is_over_interactive_silhouette(old_x, old_y, true, false),
+            (true, false),
+        );
+    }
+
+    #[test]
+    fn captures_picker_controls_and_keyboard_only_while_open() {
+        let bounds = Some(TailPickerBounds {
+            toolbar: [0.05, 0.02, 0.95, 0.16],
+            keyboard: [0.13, 0.65, 0.95, 0.91],
+            close_button: [0.96, 0.08, 0.995, 0.16],
+        });
+        assert!(tail_picker_captures_cursor(bounds, 0.87, 0.05, false));
+        assert!(tail_picker_captures_cursor(bounds, 0.5, 0.8, true));
+        assert!(tail_picker_captures_cursor(bounds, 0.9775, 0.12, true));
+        assert!(tail_picker_captures_cursor(bounds, 0.9775, 0.12, false));
+        assert!(tail_picker_captures_cursor(bounds, 0.9775, 0.152, false));
+        assert!(!tail_picker_captures_cursor(bounds, 0.961, 0.081, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.955, 0.12, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.5, 0.8, false));
+        assert!(!tail_picker_captures_cursor(bounds, 0.99, 0.05, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.10, 0.89, true));
+        assert!(!tail_picker_captures_cursor(bounds, 0.5, 0.45, true));
+        assert!(!tail_picker_captures_cursor(None, 0.87, 0.05, false));
+        assert!(!tail_picker_captures_cursor(None, 0.5, 0.8, true));
+        assert!(!tail_picker_captures_cursor(None, 0.9775, 0.12, false));
+    }
+}
+
 fn start_hit_test_loop(
     app: AppHandle,
     settings: Arc<Mutex<AppSettings>>,
@@ -1375,11 +1680,15 @@ fn start_hit_test_loop(
     update_banner_open: Arc<AtomicBool>,
     paused_guard: Arc<AtomicBool>,
 ) {
+    let state = app.state::<AppState>();
+    let tail_picker_bounds = state.tail_picker_bounds.clone();
+    let desktop_3d_active = state.desktop_3d_active.clone();
     std::thread::spawn(move || {
         let mut last_ignore: Option<bool> = None;
         let mut last_cursor: (i32, i32) = (i32::MIN, i32::MIN);
         let mut last_alt_override = false;
         let mut last_effective_locked = false;
+        let mut last_over_cat = false;
         #[cfg(windows)]
         let mut drift_ticks: u8 = 0;
         #[cfg(windows)]
@@ -1453,6 +1762,7 @@ fn start_hit_test_loop(
             };
 
             let is_menu = menu_open.load(Ordering::Relaxed);
+            let picker_bounds = *tail_picker_bounds.lock().unwrap();
             let is_drag = dragging.load(Ordering::Relaxed);
             let is_banner = update_banner_open.load(Ordering::Relaxed);
 
@@ -1461,7 +1771,7 @@ fn start_hit_test_loop(
             // foreground window every ~150ms (and shortly after foreground switches), reasserting
             // HWND_TOPMOST strictly on the window owner thread without stealing focus (SWP_NOACTIVATE).
             #[cfg(windows)]
-            if always_on_top && !is_menu && !is_drag {
+            if always_on_top && !is_menu && picker_bounds.is_none() && !is_drag {
                 let fg_raw = win_foreground_hwnd();
                 let fg_id = fg_raw as isize;
                 if fg_id != last_fg_hwnd {
@@ -1552,7 +1862,9 @@ fn start_hit_test_loop(
             let inside_pet = pet_rx >= 0.0 && pet_rx <= 1.0 && pet_ry >= 0.0 && pet_ry <= 1.0;
 
             let (over_interactive, raw_over_cat) = if inside_pet {
-                is_over_interactive_silhouette(pet_rx, pet_ry, is_108, is_big_fish)
+                let is_2d = is_win7_ulw || !desktop_3d_active.load(Ordering::Relaxed);
+                let has_relocated_mouse = is_108 && !is_big_fish && is_2d;
+                is_over_interactive_silhouette(pet_rx, pet_ry, is_108, has_relocated_mouse)
             } else {
                 (false, false)
             };
@@ -1566,10 +1878,11 @@ fn start_hit_test_loop(
             }
 
             let over_banner = is_banner && inside && ry <= 0.19;
+            // The picker lives inside the pet window, unlike the separate side menu.
+            let over_tail_picker =
+                inside && tail_picker_captures_cursor(picker_bounds, rx, ry, !is_win7_ulw);
 
-            // The context menu is its own independent OS window ("menu"), so do NOT disable
-            // click-through on "main"'s empty transparent padding when `is_menu` is true.
-            let should_ignore = if is_drag || over_banner {
+            let should_ignore = if is_drag || over_banner || over_tail_picker {
                 false
             } else if effective_locked {
                 true
@@ -1626,10 +1939,12 @@ fn start_hit_test_loop(
             if (cx, cy) != last_cursor
                 || alt_override != last_alt_override
                 || effective_locked != last_effective_locked
+                || over_cat != last_over_cat
             {
                 last_cursor = (cx, cy);
                 last_alt_override = alt_override;
                 last_effective_locked = effective_locked;
+                last_over_cat = over_cat;
                 let _ = app.emit(
                     "kuro-cursor",
                     WindowCursorInfo {
@@ -1940,6 +2255,8 @@ pub fn run() {
         .manage(AppState {
             settings: settings_arc,
             menu_open,
+            tail_picker_bounds: Arc::new(Mutex::new(None)),
+            desktop_3d_active: Arc::new(AtomicBool::new(false)),
             menu_creating,
             menu_opened_at,
             dragging,
@@ -2043,6 +2360,11 @@ pub fn run() {
                 settings_for_setup.clone(),
                 paused_for_setup.clone(),
             );
+            game_detect::start_game_detection_watcher(
+                handle.clone(),
+                settings_for_setup.clone(),
+                paused_for_setup.clone(),
+            );
             start_hit_test_loop(
                 handle.clone(),
                 settings_for_setup,
@@ -2070,6 +2392,14 @@ pub fn run() {
             handle.listen("kuro-privacy", |ev| {
                 let active = ev.payload().trim() == "true";
                 obs::set_privacy_active(active);
+            });
+            handle.listen("kuro-game-active", |ev| {
+                let raw = ev.payload();
+                let active = serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()
+                    .and_then(|v| v.get("active").and_then(|a| a.as_bool()))
+                    .unwrap_or(false);
+                obs::set_game_active(active, raw);
             });
             obs::sync_obs_server(&handle, s.obs_enabled, s.obs_port);
             if s.obs_enabled && s.obs_hide_pet {
@@ -2112,6 +2442,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             get_cats,
+            get_game_active,
             get_mcp_config,
             get_obs_url,
             get_app_version,
@@ -2121,7 +2452,11 @@ pub fn run() {
             open_tail_picker_from_menu,
             preview_scale,
             set_menu_open,
+            set_tail_picker_bounds,
+            set_desktop_3d_active,
+            save_tail_picker_selection,
             set_dragging,
+            start_pet_drag,
             set_update_banner_open,
             is_win7_ulw_mode,
             win7_present_frame,
@@ -2223,6 +2558,30 @@ mod windows_zorder_tests {
                 "non-overlapping fg window should never trigger topmost reorder"
             );
 
+            // Verify SetWindowPos allows borderless pet window top headroom above y=0 (no Aero top-edge lock!)
+            SetWindowPos(
+                model,
+                std::ptr::null_mut(),
+                300,
+                -70,
+                0,
+                0,
+                SWP_NOSIZE
+                    | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER
+                    | SWP_NOACTIVATE,
+            );
+            let mut rc = windows_sys::Win32::Foundation::RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            assert_ne!(
+                windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(model, &mut rc),
+                0
+            );
+            assert_eq!(rc.top, -70, "SetWindowPos should place pet window cleanly at y=-70 without top-edge clamp");
+
             let _ = DestroyWindow(fg);
             let _ = DestroyWindow(model);
         }
@@ -2284,5 +2643,18 @@ mod side_menu_layout_tests {
         let menu = (266, 400);
         let (_mx, my) = compute_side_menu_pos(pet, work, menu, 10, 10);
         assert!(my + menu.1 <= pet.1, "should open cleanly above the cat");
+    }
+
+    #[test]
+    fn drag_clamp_allows_cat_ears_to_reach_top_of_screen_without_losing_window() {
+        // 1920x1080 virtual desktop, 420x440 window: transparent top headroom (~75px) may go above y=0
+        let (x, y) = super::clamp_pet_drag_position(500, -140, 420, 440, 0, 0, 1920, 1080);
+        assert_eq!(x, 500);
+        assert_eq!(y, -75, "cat window should smoothly slide up by ~17% headroom so ears touch y=0");
+
+        // Trying to drag way off-screen left/right/bottom keeps pet safely reachable
+        let (lx, by) = super::clamp_pet_drag_position(-500, 2000, 420, 440, 0, 0, 1920, 1080);
+        assert_eq!(lx, -42);
+        assert!(by <= 1080 - 290 && by >= 700, "pet body stays safely visible at bottom edge");
     }
 }

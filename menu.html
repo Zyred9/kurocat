@@ -17,6 +17,34 @@
         <div class="breed-pills" id="breed-pills"></div>
       </div>
 
+      <div class="menu-scale-row" id="render-mode-row">
+        <span class="menu-scale-label">视觉模式（可选 3D / 2D）</span>
+        <div class="kb-pills">
+          <button class="kb-pill active" data-rendermode="3d" type="button" title="Three.js 真 3D 体积光影手办">✨ 3D 立体</button>
+          <button class="kb-pill" data-rendermode="2d" type="button" title="经典 2D 矢量手绘，极简省电">🎨 2D 经典</button>
+        </div>
+      </div>
+
+      <div class="menu-scale-row" id="collar-row">
+        <span class="menu-scale-label">3D 项圈铃铛</span>
+        <div class="collar-pills">
+          <button class="kb-pill active" data-collar="none" type="button">无</button>
+          <button class="kb-pill" data-collar="red" type="button">红</button>
+          <button class="kb-pill" data-collar="blue" type="button">蓝</button>
+          <button class="kb-pill" data-collar="pink" type="button">粉</button>
+          <button class="kb-pill" data-collar="green" type="button">绿</button>
+        </div>
+      </div>
+
+      <div class="menu-scale-row" id="headphone-row">
+        <span class="menu-scale-label">电竞耳机</span>
+        <div class="render-mode-pills">
+          <button class="kb-pill active" data-headphonemode="off" type="button" title="不戴耳机">关闭</button>
+          <button class="kb-pill" data-headphonemode="auto" type="button" title="检测到玩游戏时自动戴上电竞耳机，退出后自动摘下">🎮 游戏自动</button>
+          <button class="kb-pill" data-headphonemode="on" type="button" title="随时一直戴着电竞耳机">🎧 常戴</button>
+        </div>
+      </div>
+
       <div class="menu-sep"></div>
 
       <button class="menu-item" data-action="toggle-privacy" title="检测到输入密码时猫猫自动闭眼、大肥鱼双手捂眼并隐藏全部按键">
@@ -135,7 +163,7 @@
       </button>
       <button class="menu-item" data-action="check-update" id="btn-check-update">
         <span>检查更新</span>
-        <span class="menu-hint" id="update-hint">v4.9.1</span>
+        <span class="menu-hint" id="update-hint">v5.0.1</span>
       </button>
       <button class="menu-item danger" data-action="quit">
         <span>退出 KuroCat</span>
