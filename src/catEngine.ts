@@ -647,6 +647,9 @@ export class KuroCatEngine {
       kbTiltRad: this.kbTiltRad,
       mouseBtnX: mx + localBtnX * c - localBtnY * s,
       mouseBtnY: my + localBtnX * s + localBtnY * c,
+      cursor: this.hasPointerPosition
+        ? { x: this.cursorRelX * this.logicalW, y: this.cursorRelY * this.logicalH }
+        : null,
       mouseNX: this.lastMouseNX,
       mouseLeft: this.mouseLeftDown,
       mouseRight: this.mouseRightDown,
@@ -710,6 +713,7 @@ export class KuroCatEngine {
   // Cursor & 100% live eye tracking + 2.5D head turn
   private cursorRelX = 0.5;
   private cursorRelY = 0.5;
+  private hasPointerPosition = false;
   private cursorOverCat = false;
   private eyeLookX = 0;
   private eyeLookY = 0;
@@ -1464,15 +1468,22 @@ export class KuroCatEngine {
     this.petStrokeCount = 0;
   }
 
-  public onWindowCursor(relX: number, relY: number, overCat: boolean): void {
+  public onWindowCursor(relX: number, relY: number, overCat: boolean, input: 'pointer' | 'touch' = 'pointer'): void {
     const now = performance.now();
     const cursorDelta = Math.hypot(relX - this.cursorRelX, relY - this.cursorRelY);
-    if (relX !== this.cursorRelX || relY !== this.cursorRelY || overCat !== this.cursorOverCat) {
+    const hasPointerPosition = input === 'pointer';
+    if (
+      relX !== this.cursorRelX ||
+      relY !== this.cursorRelY ||
+      overCat !== this.cursorOverCat ||
+      hasPointerPosition !== this.hasPointerPosition
+    ) {
       this.wakeRendering(now);
       if (cursorDelta > 0.0015) {
         this.lastCursorEyeAt = now;
       }
     }
+    this.hasPointerPosition = hasPointerPosition;
     this.cursorRelX = relX;
     this.cursorRelY = relY;
     this.cursorOverCat = overCat;
