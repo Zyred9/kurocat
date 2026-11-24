@@ -221,32 +221,11 @@ function syncMenuUI(): void {
     engine.setRenderScale(settings.scale);
   }
   catAudio.setEnabled(settings.soundEnabled);
-  if (tailPickerOpen) syncTailPickerBounds();
 }
 
 function syncWindowInteractiveState(): void {
-  const open = !menuEl.classList.contains('hidden');
+  const open = !menuEl.classList.contains('hidden') || tailPickerOpen;
   void invoke('set_menu_open', { open });
-}
-
-function syncTailPickerBounds(): void {
-  if (!tailPickerOpen) {
-    void invoke('set_tail_picker_bounds', { bounds: null });
-    return;
-  }
-
-  const normalized = (rect: DOMRect) => [
-    rect.left / window.innerWidth,
-    rect.top / window.innerHeight,
-    rect.right / window.innerWidth,
-    rect.bottom / window.innerHeight,
-  ];
-  void invoke('set_tail_picker_bounds', {
-    bounds: {
-      toolbar: normalized(tailPickerBarEl.getBoundingClientRect()),
-      keyboard: normalized(engine.getKeyboardClientBounds()),
-    },
-  });
 }
 
 function closeContextMenu(): void {
@@ -285,6 +264,7 @@ function openTailPicker(): void {
   tailPickerStatusOverride = null;
   tailPickerBarEl.classList.remove('hidden');
   engine.setTailPickerActive(true);
+  syncWindowInteractiveState();
   if (settings.tailKeyMode !== 'custom') {
     void applySettingsPatch({ tailKeyMode: 'custom' });
   } else {
@@ -300,7 +280,7 @@ function closeTailPicker(): void {
   tailPickerBarEl.classList.add('hidden');
   canvas.classList.remove('tail-key-hover');
   engine.setTailPickerActive(false);
-  syncTailPickerBounds();
+  syncWindowInteractiveState();
   syncWin7OverlayFn?.(false);
 }
 
@@ -650,13 +630,6 @@ async function bootstrap(): Promise<void> {
   btnTailDoneEl.addEventListener('click', (e) => {
     e.stopPropagation();
     closeTailPicker();
-  });
-
-  window.addEventListener('resize', () => {
-    if (tailPickerOpen) syncTailPickerBounds();
-  });
-  tailPickerBarEl.addEventListener('animationend', () => {
-    if (tailPickerOpen) syncTailPickerBounds();
   });
 
   tailPickerBarEl.addEventListener('click', (e) => {
