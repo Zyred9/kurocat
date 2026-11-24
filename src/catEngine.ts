@@ -19,6 +19,12 @@ const TYPING_STREAK_MS = 4000;
 const TYPING_STREAK_MAX_GAP_MS = 650;
 const TYPING_EMOTION_HOLD_MS = 1200;
 const TYPING_EMOTION_FADE_MS = 350;
+const TYPING_FATIGUE_AFTER_BURST_MS = 5300;
+const TYPING_FATIGUE_PAUSE_MS = 520;
+const TYPING_FATIGUE_RECOVERY_DELAY_MS = 780;
+const TYPING_FATIGUE_RECOVERY_MS = 1650;
+const TYPING_EXHALE_DELAY_MS = 100;
+const TYPING_EXHALE_MS = 720;
 
 export type CatBreed = 'black' | 'ragdoll';
 export type KeyboardOrientation = 'cat' | 'viewer';
@@ -244,6 +250,11 @@ export class KuroCatEngine {
   private typingStreakStartedAt = 0;
   private typingEmotionStartedAt: number | null = null;
   private typingEmotionLastKeyAt = Number.NEGATIVE_INFINITY;
+  private fastTypingStartedAt: number | null = null;
+  private typingFatigued = false;
+  private typingFatigue = 0;
+  private typingSigh = 0;
+  private typingExhaleProgress = 0;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private typingEnergy = 0;
   private lastAnyKeyAt = -10000;
@@ -342,9 +353,12 @@ export class KuroCatEngine {
     const shearCurve = u * u * (3 - 2 * u); // smoothstep from hips up to head!
     // Measured mouse-lean shift (-46px at head) + lively typing left-right body/head sway (+-25px)!
     const leanAmp = this.keyboardLayout === '108' ? 38 : 46;
-    const leanX = (this.spineLean * leanAmp + this.typingSway * 25 + this.strikeRock * 10) * shearCurve;
+    const fatigue = this.typingFatigue > 0 && !this.reducedMotion.matches ? this.typingFatigue : 0;
+    const sway = this.typingSway * (1 - fatigue * 0.58);
+    const leanX = (this.spineLean * leanAmp + sway * 25 + this.strikeRock * 10) * shearCurve;
     const swayDipY = Math.abs(this.typingSway) * 4.0 * shearCurve;
-    const hunchY = (this.typingHunch * 13 + this.bodyBob * 4.8 + breath) * shearCurve + swayDipY;
+    const tiredDrop = fatigue * 25 + this.typingSigh * 18;
+    const hunchY = (this.typingHunch * 13 + this.bodyBob * 4.8 + breath + tiredDrop) * shearCurve + swayDipY;
     // Slight forward drop when leaning deeply to the mouse
     const leanDropY = Math.abs(this.spineLean) * 6 * shearCurve;
     return {
@@ -491,13 +505,48 @@ export class KuroCatEngine {
     this.typingEmotionLastKeyAt = now;
     if (keyGap > TYPING_STREAK_MAX_GAP_MS) this.typingStreakStartedAt = now;
 
-    if (this.typingEmotionStartedAt !== null && keyGap < TYPING_EMOTION_HOLD_MS + TYPING_EMOTION_FADE_MS) return;
+    if (keyGap >= TYPING_FATIGUE_PAUSE_MS) {
+      this.fastTypingStartedAt = null;
+      if (this.typingFatigued) {
+        // Starting after a rest begins a fresh typing streak.
+        this.typingFatigued = false;
+        this.typingEmotionStartedAt = null;
+        this.typingStreakStartedAt = now;
+        return;
+      }
+    }
+    if (this.typingFatigued) return;
 
     const realKeys = this.recentKeyTimes.filter((key) => !key.demo);
     const burstStart = realKeys[realKeys.length - TYPING_EMOTION_KEY_COUNT];
     const fastTyping = burstStart !== undefined && now - burstStart.at <= TYPING_WINDOW_MS;
+    const continuingBurst = fastTyping && burstStart.at >= this.typingStreakStartedAt;
+    this.fastTypingStartedAt = continuingBurst ? (this.fastTypingStartedAt ?? now) : null;
+    if (this.fastTypingStartedAt !== null && now - this.fastTypingStartedAt >= TYPING_FATIGUE_AFTER_BURST_MS) {
+      this.typingFatigued = true;
+      return;
+    }
+
+    if (this.typingEmotionStartedAt !== null && keyGap < TYPING_EMOTION_HOLD_MS + TYPING_EMOTION_FADE_MS) return;
     const sustainedTyping = now - this.typingStreakStartedAt >= TYPING_STREAK_MS;
     this.typingEmotionStartedAt = fastTyping || sustainedTyping ? now : null;
+  }
+
+  private updateTypingFatigue(now: number, dt: number): void {
+    if (!this.typingFatigued && this.typingFatigue === 0) return;
+
+    const restAge = now - this.typingEmotionLastKeyAt - TYPING_FATIGUE_PAUSE_MS;
+    const recovery = Math.max(0, Math.min(1, (restAge - TYPING_FATIGUE_RECOVERY_DELAY_MS) / TYPING_FATIGUE_RECOVERY_MS));
+    if (recovery === 1) this.typingFatigued = false;
+
+    const targetFatigue = this.typingFatigued ? 1 - recovery : 0;
+    const response = this.typingFatigued ? 4 : 14;
+    this.typingFatigue += (targetFatigue - this.typingFatigue) * (1 - Math.exp(-response * dt));
+    if (targetFatigue === 0 && this.typingFatigue < 0.001) this.typingFatigue = 0;
+
+    const exhale = (restAge - TYPING_EXHALE_DELAY_MS) / TYPING_EXHALE_MS;
+    this.typingExhaleProgress = this.typingFatigued && !this.reducedMotion.matches && exhale > 0 && exhale < 1 ? exhale : 0;
+    this.typingSigh = Math.sin(this.typingExhaleProgress * Math.PI);
   }
 
   public onKeyUp(vk: number): void {
@@ -737,6 +786,7 @@ export class KuroCatEngine {
 
   private update(dt: number, now: number): void {
     this.elapsed += dt;
+    this.updateTypingFatigue(now, dt);
 
     const mLerp = 1 - Math.exp(-28 * dt);
     this.mouseOffsetX += (this.mouseTargetOffsetX - this.mouseOffsetX) * mLerp;
@@ -1008,6 +1058,7 @@ export class KuroCatEngine {
       this.drawMouseBadges(ctx);
     }
     this.drawTypingEmotion(ctx, breath, purrShift);
+    this.drawTypingExhale(ctx, breath, purrShift);
 
     ctx.restore();
   }
@@ -1017,7 +1068,8 @@ export class KuroCatEngine {
     const age = this.lastTime - this.typingEmotionStartedAt;
     const idleTime = this.lastTime - this.typingEmotionLastKeyAt;
     const fade = Math.max(0, (idleTime - TYPING_EMOTION_HOLD_MS) / TYPING_EMOTION_FADE_MS);
-    if (age < 0 || fade >= 1) return;
+    const fatigueFade = Math.max(0, 1 - this.typingFatigue * 2.4);
+    if (age < 0 || fade >= 1 || fatigueFade === 0) return;
 
     const headCenter = this.spinePoint(0.24, breath);
     const reducedMotion = this.reducedMotion.matches;
@@ -1027,7 +1079,7 @@ export class KuroCatEngine {
     const size = reducedMotion ? 1 : 0.64 + pop * (0.36 + bounce * 0.26);
 
     ctx.save();
-    ctx.globalAlpha = Math.min(1, age / 80, 1 - fade);
+    ctx.globalAlpha = Math.min(1, age / 80, 1 - fade) * fatigueFade;
     ctx.translate(headCenter.x + purrShift, headCenter.y);
     ctx.rotate(this.headTilt);
     ctx.translate(18, -32);
@@ -1049,6 +1101,36 @@ export class KuroCatEngine {
     ctx.stroke();
     ctx.fillStyle = '#e83842';
     ctx.fill();
+    ctx.restore();
+  }
+
+  private drawTypingExhale(ctx: CanvasRenderingContext2D, breath: number, purrShift: number): void {
+    const progress = this.typingExhaleProgress;
+    if (progress === 0) return;
+
+    const head = this.spinePoint(0.24, breath);
+    const size = 0.76 + progress * 0.51;
+    ctx.save();
+    ctx.globalAlpha = Math.min(progress * 8, (1 - progress) * 2.4, 1);
+    ctx.translate(head.x + purrShift, head.y);
+    ctx.rotate(this.headTilt);
+    ctx.translate(50 + progress * 38, 28 - progress * 13);
+    ctx.scale(size, size);
+    ctx.beginPath();
+    ctx.moveTo(-20, 8);
+    ctx.quadraticCurveTo(-11, 3, -7, 0);
+    ctx.bezierCurveTo(-9, -8, -1, -12, 5, -7);
+    ctx.bezierCurveTo(11, -13, 21, -7, 17, -1);
+    ctx.bezierCurveTo(24, 3, 17, 11, 10, 8);
+    ctx.quadraticCurveTo(2, 13, -4, 6);
+    ctx.quadraticCurveTo(-11, 4, -20, 8);
+    ctx.closePath();
+    ctx.fillStyle = '#faffe9';
+    ctx.fill();
+    ctx.strokeStyle = '#728c7e';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1569,10 +1651,24 @@ export class KuroCatEngine {
     ctx.restore();
   }
 
+  private clipTiredEyelid(ctx: CanvasRenderingContext2D, rx: number, openRy: number): void {
+    if (this.typingFatigue === 0) return;
+
+    const lid = -openRy + this.typingFatigue * openRy * 0.63;
+    ctx.beginPath();
+    ctx.moveTo(-rx - 1, lid - 0.9);
+    ctx.quadraticCurveTo(0, lid + 1.5, rx + 1, lid + 0.9);
+    ctx.lineTo(rx + 1, openRy + 1);
+    ctx.lineTo(-rx - 1, openRy + 1);
+    ctx.closePath();
+    ctx.clip();
+  }
+
   private drawEyes(ctx: CanvasRenderingContext2D, cx: number, eyeY: number): void {
     const isRagdoll = this.catBreed === 'ragdoll';
     const blinkVal = this.isBlinking ? 1 - Math.abs(this.blinkProgress - 1) : 0;
-    const closedness = Math.max(blinkVal, this.squintAmount * 0.85);
+    const tiredLids = this.typingFatigue * 0.43 + this.typingSigh * 0.29;
+    const closedness = Math.max(blinkVal, this.squintAmount * 0.85, tiredLids);
 
     // Exact measured eye spacing & size from original 0.3s & 10.6s!
     const eyeXs = [cx - 23.0, cx + 23.0];
@@ -1618,6 +1714,7 @@ export class KuroCatEngine {
       const openRy = Math.max(1.2, ry * (1 - closedness));
       const curiousTilt = (idx === 0 ? -0.1 : 0.1) * (0.25 + this.typingHunch * 0.75);
       ctx.rotate(curiousTilt);
+      this.clipTiredEyelid(ctx, rx, openRy);
 
       if (isRagdoll) {
         // Gentle soulful sky-cerulean Ragdoll eyes (warm & lifelike, matching user's Ragdoll!)
@@ -1642,7 +1739,7 @@ export class KuroCatEngine {
         const px = this.eyeLookX;
         const py = this.eyeLookY;
         const pupilRx = 6.2;
-        const pupilRy = 8.8;
+        const pupilRy = 8.8 - this.typingFatigue * 2.1;
 
         ctx.fillStyle = isRagdoll ? '#101624' : '#0e0e10';
         ctx.beginPath();
@@ -2897,7 +2994,8 @@ export class KuroCatEngine {
 
   private drawCustomEyes(ctx: CanvasRenderingContext2D, s: ResolvedSkin, cx: number, eyeY: number): void {
     const blinkVal = this.isBlinking ? 1 - Math.abs(this.blinkProgress - 1) : 0;
-    const closedness = Math.max(blinkVal, this.squintAmount * 0.85);
+    const tiredLids = this.typingFatigue * 0.43 + this.typingSigh * 0.29;
+    const closedness = Math.max(blinkVal, this.squintAmount * 0.85, tiredLids);
     const eyeXs = [cx - 23.0, cx + 23.0];
     const rx = 14.8 + this.typingHunch * 1.0;
     const ry = 13.4 - this.typingHunch * 0.5;
@@ -2930,6 +3028,7 @@ export class KuroCatEngine {
       const openRy = Math.max(1.2, ry * (1 - closedness));
       const curiousTilt = (idx === 0 ? -0.1 : 0.1) * (0.25 + this.typingHunch * 0.75);
       ctx.rotate(curiousTilt);
+      this.clipTiredEyelid(ctx, rx, openRy);
 
       const irisGrad = ctx.createLinearGradient(0, -openRy, 0, openRy);
       irisGrad.addColorStop(0.0, s.eyeColorTop);
@@ -2946,7 +3045,7 @@ export class KuroCatEngine {
         const py = this.eyeLookY;
         ctx.fillStyle = s.pupilColor;
         ctx.beginPath();
-        ctx.ellipse(px, py, 6.2, 8.8, 0, 0, Math.PI * 2);
+        ctx.ellipse(px, py, 6.2, 8.8 - this.typingFatigue * 2.1, 0, 0, Math.PI * 2);
         ctx.fill();
 
         if (s.eyeCatchlight) {
