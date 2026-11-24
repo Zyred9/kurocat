@@ -7,7 +7,7 @@ use crate::{
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 
 fn default_tray_tooltip() -> &'static str {
     #[cfg(windows)]
@@ -43,10 +43,15 @@ pub fn setup_tray(app: &AppHandle, initial: &AppSettings) -> tauri::Result<()> {
         };
         MenuItem::with_id(app, "restart_as_admin", label, !elevated, None::<&str>)?
     };
+    let click_through_label = if cfg!(target_os = "macos") {
+        "锁定鼠标穿透（按住 Option 可临时操作）"
+    } else {
+        "锁定鼠标穿透（按住 Alt 可临时操作）"
+    };
     let click_through = CheckMenuItem::with_id(
         app,
         "click_through",
-        "锁定鼠标穿透（按住 Alt 可临时操作）",
+        click_through_label,
         true,
         initial.click_through_locked,
         None::<&str>,
@@ -343,6 +348,32 @@ pub fn setup_tray(app: &AppHandle, initial: &AppSettings) -> tauri::Result<()> {
 
     let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
     let pause_guard_for_click = pause_guard.clone();
+
+    // Keep tray checkmarks synchronized when settings change from right-click menu, toast, or MCP.
+    {
+        let ct = click_through.clone();
+        let kb = key_bubbles.clone();
+        let pg = privacy_guard.clone();
+        let st = sound_toggle.clone();
+        let aot = always_on_top.clone();
+        let auto = autostart.clone();
+        let ot = obs_toggle.clone();
+        let oh = obs_hide_pet.clone();
+        let mt = mcp_toggle.clone();
+        app.listen("kuro-settings", move |ev| {
+            if let Ok(s) = serde_json::from_str::<AppSettings>(ev.payload()) {
+                let _ = ct.set_checked(s.click_through_locked);
+                let _ = kb.set_checked(s.show_key_bubbles);
+                let _ = pg.set_checked(s.privacy_password_guard);
+                let _ = st.set_checked(s.sound_enabled);
+                let _ = aot.set_checked(s.always_on_top);
+                let _ = auto.set_checked(s.autostart);
+                let _ = ot.set_checked(s.obs_enabled);
+                let _ = oh.set_checked(s.obs_enabled && s.obs_hide_pet);
+                let _ = mt.set_checked(s.mcp_enabled);
+            }
+        });
+    }
 
     TrayIconBuilder::with_id("kuro-tray")
         .icon(icon)

@@ -44,6 +44,17 @@ interface UpdateInfo {
   notesSummary: string;
 }
 
+interface UpdateProgressEvent {
+  stage: 'checking' | 'available' | 'up_to_date' | 'downloading' | 'verifying' | 'installing' | 'error';
+  message: string;
+  info?: UpdateInfo | null;
+}
+
+type MenuTabId = 'appearance' | 'system';
+
+const isMacPlatform = (): boolean =>
+  /Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent);
+
 const TAIL_MODE_LABELS: Record<TailKeyMode, string> = {
   smart: '智能第三只手',
   custom: '自定义按键',
@@ -79,9 +90,13 @@ let settings: AppSettings = {
 
 let catList: CatSkinConfig[] = [...DEFAULT_BUILTIN_CATS];
 let sliderDragging = false;
-let currentAppVersion = '5.0.2';
+let currentAppVersion = '5.1.0';
+let cachedUpdateInfo: UpdateInfo | null = null;
+let updateBusy = false;
+let activeTab: MenuTabId = 'appearance';
 
 const menuEl = document.getElementById('context-menu') as HTMLDivElement;
+const tabBodyEl = document.getElementById('menu-tab-body') as HTMLDivElement | null;
 const breedPillsEl = document.getElementById('breed-pills') as HTMLDivElement;
 const scaleSliderEl = document.getElementById('scale-slider') as HTMLInputElement;
 const scaleValueEl = document.getElementById('scale-value') as HTMLButtonElement;
@@ -94,6 +109,38 @@ let settingsOperations = Promise.resolve();
 const tailModeBadgeEl = document.getElementById('tail-mode-badge') as HTMLSpanElement;
 const tailKeysCountEl = document.getElementById('tail-keys-count') as HTMLSpanElement;
 const btnObsHideEl = document.getElementById('btn-obs-hide') as HTMLButtonElement;
+const btnCheckUpdateEl = document.getElementById('btn-check-update') as HTMLButtonElement | null;
+
+function switchTab(nextTab: MenuTabId): void {
+  activeTab = nextTab;
+  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((btn) => {
+    const isActive = btn.dataset.tab === activeTab;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  document.querySelectorAll<HTMLElement>('[data-tab-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.tabPanel !== activeTab);
+  });
+  if (tabBodyEl) {
+    tabBodyEl.scrollTop = 0;
+  }
+}
+
+function renderFooterUpdateState(customLabel?: string, ready = false): void {
+  const hint = document.getElementById('update-hint');
+  const isReady = ready || Boolean(cachedUpdateInfo?.hasUpdate);
+  if (btnCheckUpdateEl) {
+    btnCheckUpdateEl.classList.toggle('update-ready', isReady);
+  }
+  if (!hint) return;
+  if (customLabel) {
+    hint.textContent = customLabel;
+  } else if (cachedUpdateInfo?.hasUpdate) {
+    hint.textContent = `⬆ 更新 v${cachedUpdateInfo.latestVersion}`;
+  } else {
+    hint.textContent = `检查更新 v${currentAppVersion}`;
+  }
+}
 
 function closeMenu(): void {
   cancelOpacityPreview();
@@ -378,40 +425,68 @@ async function createDesktopShortcut(): Promise<void> {
 }
 
 async function triggerManualUpdateCheck(): Promise<void> {
-  const hint = document.getElementById('update-hint');
-  if (hint) hint.textContent = '检查中…';
+  if (updateBusy) return;
+  // If we already know an update is available, clicking immediately installs (or opens release page).
+  if (cachedUpdateInfo?.hasUpdate) {
+    if (cachedUpdateInfo.downloadUrl) {
+      updateBusy = true;
+      renderFooterUpdateState(`下载 v${cachedUpdateInfo.latestVersion}...`, true);
+      closeMenu();
+      try {
+        await invoke('install_update', { info: cachedUpdateInfo });
+      } catch {
+        updateBusy = false;
+        renderFooterUpdateState();
+      }
+      return;
+    }
+    if (cachedUpdateInfo.releaseUrl) {
+      void invoke('open_release_page', { url: cachedUpdateInfo.releaseUrl });
+      closeMenu();
+      return;
+    }
+  }
+
+  updateBusy = true;
+  renderFooterUpdateState('检查更新中…', false);
   try {
     const info = await invoke<UpdateInfo>('check_for_update');
+    updateBusy = false;
     if (info.hasUpdate) {
-      if (hint) {
-        hint.textContent = `发现 v${info.latestVersion}`;
-        hint.classList.add('copied');
-      }
-      if (info.releaseUrl) {
-        void invoke('open_release_page', { url: info.releaseUrl });
-      }
-    } else if (hint) {
-      hint.textContent = `最新 v${info.currentVersion}`;
+      cachedUpdateInfo = info;
+      renderFooterUpdateState(`⬆ 点击更新 v${info.latestVersion}`, true);
+    } else {
+      cachedUpdateInfo = info;
+      renderFooterUpdateState(`✓ 最新 v${info.currentVersion}`, false);
       setTimeout(() => {
-        hint.textContent = `v${currentAppVersion}`;
+        renderFooterUpdateState();
       }, 2200);
     }
   } catch {
-    if (hint) {
-      hint.textContent = '检查失败';
-      setTimeout(() => {
-        hint.textContent = `v${currentAppVersion}`;
-      }, 2200);
-    }
+    updateBusy = false;
+    renderFooterUpdateState('检查失败，点此重试', false);
+    setTimeout(() => {
+      renderFooterUpdateState();
+    }, 2200);
   }
 }
 
 async function bootstrap(): Promise<void> {
+  if (isMacPlatform()) {
+    const shortcutBtn = document.getElementById('btn-desktop-shortcut');
+    if (shortcutBtn) shortcutBtn.classList.add('hidden');
+    const lockLbl = document.getElementById('lbl-toggle-lock');
+    if (lockLbl) lockLbl.textContent = '锁定鼠标穿透（Option 解锁）';
+    const lockBtn = document.getElementById('btn-toggle-lock');
+    if (lockBtn) lockBtn.title = '开启后重启保持锁定，按住 Option 或在菜单栏可随时解锁';
+  }
+
   try {
-    const [loadedSettings, loadedCats, ver] = await Promise.all([
+    const [loadedSettings, loadedCats, ver, cachedUpd] = await Promise.all([
       invoke<AppSettings>('get_settings'),
       invoke<CatSkinConfig[]>('get_cats'),
       invoke<string>('get_app_version'),
+      invoke<UpdateInfo | null>('get_cached_update_info').catch(() => null),
     ]);
     settings = loadedSettings;
     if (Array.isArray(loadedCats) && loadedCats.length > 0) {
@@ -419,13 +494,16 @@ async function bootstrap(): Promise<void> {
     }
     if (ver) {
       currentAppVersion = ver;
-      const hint = document.getElementById('update-hint');
-      if (hint) hint.textContent = `v${ver}`;
+    }
+    if (cachedUpd) {
+      cachedUpdateInfo = cachedUpd;
     }
   } catch (err) {
     console.error('Failed to load menu state:', err);
   }
   syncUI();
+  renderFooterUpdateState();
+  switchTab('appearance');
 
   const isWin7 = await invoke<boolean>('is_win7_ulw_mode').catch(() => false);
   if (isWin7) {
@@ -484,6 +562,15 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('blur', cancelOpacityPreview);
 
   menuEl.addEventListener('click', (e) => {
+    const tabBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
+    if (tabBtn) {
+      const t = tabBtn.dataset.tab;
+      if (t === 'appearance' || t === 'system') {
+        switchTab(t);
+      }
+      return;
+    }
+
     const target = (e.target as HTMLElement).closest<HTMLElement>(
       '[data-action], [data-breed], [data-rendermode], [data-collar], [data-headphonemode], [data-kblayout], [data-kborient], [data-tailmode]',
     );
@@ -618,20 +705,41 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  await listen<UpdateProgressEvent>('kuro-update-status', (ev) => {
+    if (ev.payload.info) {
+      cachedUpdateInfo = ev.payload.info;
+    }
+    if (ev.payload.stage === 'available' && cachedUpdateInfo?.hasUpdate) {
+      updateBusy = false;
+      renderFooterUpdateState();
+    } else if (ev.payload.stage === 'downloading' || ev.payload.stage === 'verifying' || ev.payload.stage === 'installing') {
+      updateBusy = true;
+      renderFooterUpdateState('更新中...', true);
+    } else if (ev.payload.stage === 'up_to_date' || ev.payload.stage === 'error') {
+      updateBusy = false;
+      renderFooterUpdateState();
+    }
+  });
+
   await listen('kuro-menu-opened', async () => {
     cancelOpacityPreview();
     try {
       await settingsOperations;
-      const [latestSettings, latestCats] = await Promise.all([
+      const [latestSettings, latestCats, cachedUpd] = await Promise.all([
         invoke<AppSettings>('get_settings'),
         invoke<CatSkinConfig[]>('get_cats'),
+        invoke<UpdateInfo | null>('get_cached_update_info').catch(() => null),
       ]);
       settings = latestSettings;
       if (Array.isArray(latestCats) && latestCats.length > 0) {
         catList = latestCats;
       }
+      if (cachedUpd) {
+        cachedUpdateInfo = cachedUpd;
+      }
       syncUI();
-      menuEl.scrollTop = 0;
+      renderFooterUpdateState();
+      if (tabBodyEl) tabBodyEl.scrollTop = 0;
     } catch {}
   });
 }
