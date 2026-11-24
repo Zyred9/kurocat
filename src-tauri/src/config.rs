@@ -31,6 +31,14 @@ fn default_obs_hide_pet() -> bool {
     false
 }
 
+pub fn default_opacity() -> i32 {
+    100
+}
+
+pub fn normalize_opacity(opacity: i32) -> i32 {
+    opacity.clamp(20, 100)
+}
+
 pub fn default_render_mode() -> String {
     "3d".to_string()
 }
@@ -150,6 +158,8 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows_display_id: Option<String>,
     pub scale: f64,
+    #[serde(default = "default_opacity")]
+    pub opacity: i32,
     pub always_on_top: bool,
     pub click_through_locked: bool,
     pub show_key_bubbles: bool,
@@ -195,6 +205,7 @@ impl Default for AppSettings {
             #[cfg(windows)]
             windows_display_id: None,
             scale: 1.0,
+            opacity: default_opacity(),
             always_on_top: true,
             click_through_locked: false,
             show_key_bubbles: true,
@@ -253,6 +264,7 @@ pub fn load_settings() -> AppSettings {
     if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(mut parsed) = serde_json::from_str::<AppSettings>(&content) {
             parsed.scale = parsed.scale.clamp(0.20, 1.50);
+            parsed.opacity = normalize_opacity(parsed.opacity);
             parsed.tail_key_mode = normalize_tail_key_mode(&parsed.tail_key_mode);
             parsed.tail_key_ids = normalize_tail_key_ids(&parsed.tail_key_ids);
             parsed.render_mode = normalize_render_mode(&parsed.render_mode);
@@ -511,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_settings_json_deserializes_with_tail_defaults() {
+    fn legacy_settings_json_deserializes_with_defaults() {
         let legacy = r#"{
             "x": null,
             "y": null,
@@ -525,5 +537,21 @@ mod tests {
         let parsed: AppSettings = serde_json::from_str(legacy).expect("legacy json should parse");
         assert_eq!(parsed.tail_key_mode, "smart");
         assert_eq!(parsed.tail_key_ids, default_tail_key_ids());
+        assert_eq!(serde_json::to_value(parsed).unwrap()["opacity"], 100);
+    }
+
+    #[test]
+    fn desktop_pet_opacity_round_trips_through_settings_json() {
+        let mut saved = serde_json::to_value(AppSettings::default()).unwrap();
+        saved["opacity"] = serde_json::json!(37);
+        let parsed: AppSettings = serde_json::from_value(saved).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap()["opacity"], 37);
+    }
+
+    #[test]
+    fn opacity_clamps_to_visible_range() {
+        assert_eq!(normalize_opacity(-30), 20);
+        assert_eq!(normalize_opacity(65), 65);
+        assert_eq!(normalize_opacity(130), 100);
     }
 }

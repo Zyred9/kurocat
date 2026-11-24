@@ -9,6 +9,7 @@ interface AppSettings {
   x: number | null;
   y: number | null;
   scale: number;
+  opacity: number;
   alwaysOnTop: boolean;
   clickThroughLocked: boolean;
   showKeyBubbles: boolean;
@@ -54,6 +55,7 @@ let settings: AppSettings = {
   x: null,
   y: null,
   scale: 1,
+  opacity: 100,
   alwaysOnTop: true,
   clickThroughLocked: false,
   showKeyBubbles: true,
@@ -83,11 +85,18 @@ const menuEl = document.getElementById('context-menu') as HTMLDivElement;
 const breedPillsEl = document.getElementById('breed-pills') as HTMLDivElement;
 const scaleSliderEl = document.getElementById('scale-slider') as HTMLInputElement;
 const scaleValueEl = document.getElementById('scale-value') as HTMLButtonElement;
+const opacitySliderEl = document.getElementById('opacity-slider') as HTMLInputElement;
+const opacityValueEl = document.getElementById('opacity-value') as HTMLButtonElement;
+let opacityPreview: number | null = null;
+let opacityPreviewRevision = 0;
+let pendingOpacitySave: { opacity: number } | null = null;
+let settingsOperations = Promise.resolve();
 const tailModeBadgeEl = document.getElementById('tail-mode-badge') as HTMLSpanElement;
 const tailKeysCountEl = document.getElementById('tail-keys-count') as HTMLSpanElement;
 const btnObsHideEl = document.getElementById('btn-obs-hide') as HTMLButtonElement;
 
 function closeMenu(): void {
+  cancelOpacityPreview();
   void invoke('close_context_menu');
 }
 
@@ -101,6 +110,71 @@ function updateScaleSliderVisual(scaleVal: number): void {
   if (scaleValueEl) {
     scaleValueEl.textContent = `${pctNum}%`;
   }
+}
+
+function updateOpacitySliderVisual(opacity = 100): void {
+  if (opacitySliderEl) {
+    opacitySliderEl.value = String(opacity);
+    opacitySliderEl.style.setProperty('--pct', `${((opacity - 20) / (100 - 20)) * 100}%`);
+    opacitySliderEl.setAttribute('aria-valuetext', `${opacity}%`);
+  }
+  if (opacityValueEl) {
+    opacityValueEl.textContent = `${opacity}%`;
+  }
+}
+
+function cancelOpacityPreview(): void {
+  if (opacityPreview === null) return;
+  opacityPreview = null;
+  updateOpacitySliderVisual(pendingOpacitySave?.opacity ?? settings.opacity);
+  sendOpacityPreview(() => settings.opacity);
+}
+
+function queueSettingsOperation(run: () => Promise<void>): Promise<void> {
+  const operation = settingsOperations.then(run);
+  settingsOperations = operation.catch((error) => {
+    console.error('Failed to update pet settings:', error);
+  });
+  return operation;
+}
+
+function sendOpacityPreview(value: () => number): void {
+  const revision = ++opacityPreviewRevision;
+  void queueSettingsOperation(async () => {
+    if (revision === opacityPreviewRevision) {
+      await invoke('preview_opacity', { opacity: value() });
+    }
+  });
+}
+
+function commitOpacity(opacity: number): void {
+  opacityPreview = null;
+  opacityPreviewRevision++;
+  const pending = { opacity };
+  pendingOpacitySave = pending;
+  updateOpacitySliderVisual(opacity);
+
+  void queueSettingsOperation(async () => {
+    if (opacity === settings.opacity) {
+      await invoke('preview_opacity', { opacity });
+      return;
+    }
+
+    try {
+      settings = await invoke<AppSettings>('update_settings', { patch: { ...settings, opacity } });
+      syncUI();
+    } catch (error) {
+      await invoke('preview_opacity', { opacity: settings.opacity }).catch((previewError) => {
+        console.error('Failed to restore pet opacity:', previewError);
+      });
+      throw error;
+    }
+  }).catch(() => {}).finally(() => {
+    if (pendingOpacitySave === pending) {
+      pendingOpacitySave = null;
+      updateOpacitySliderVisual(opacityPreview ?? settings.opacity);
+    }
+  });
 }
 
 function renderBreedPills(): void {
@@ -147,6 +221,7 @@ function syncUI(): void {
   if (!sliderDragging) {
     updateScaleSliderVisual(settings.scale);
   }
+  updateOpacitySliderVisual(opacityPreview ?? pendingOpacitySave?.opacity ?? settings.opacity);
 
   const kbLayout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
   const kbOrient: KeyboardOrientation = settings.keyboardOrientation === 'viewer' ? 'viewer' : 'cat';
@@ -216,11 +291,13 @@ function syncUI(): void {
   }
 }
 
-async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
-  settings = { ...settings, ...patch };
-  syncUI();
-  settings = await invoke<AppSettings>('update_settings', { patch: settings });
-  syncUI();
+function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
+  return queueSettingsOperation(async () => {
+    settings = { ...settings, ...patch };
+    syncUI();
+    settings = await invoke<AppSettings>('update_settings', { patch: settings });
+    syncUI();
+  });
 }
 
 async function copyText(text: string): Promise<void> {
@@ -391,6 +468,21 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  if (opacitySliderEl) {
+    opacitySliderEl.addEventListener('input', () => {
+      const opacity = opacitySliderEl.valueAsNumber;
+      opacityPreview = opacity;
+      updateOpacitySliderVisual(opacity);
+      sendOpacityPreview(() => opacity);
+    });
+    opacitySliderEl.addEventListener('change', () => commitOpacity(opacitySliderEl.valueAsNumber));
+    opacitySliderEl.addEventListener('dblclick', () => commitOpacity(100));
+    opacitySliderEl.addEventListener('pointercancel', cancelOpacityPreview);
+    opacitySliderEl.addEventListener('blur', cancelOpacityPreview);
+  }
+  opacityValueEl?.addEventListener('click', () => commitOpacity(100));
+  window.addEventListener('blur', cancelOpacityPreview);
+
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
       '[data-action], [data-breed], [data-rendermode], [data-collar], [data-headphonemode], [data-kblayout], [data-kborient], [data-tailmode]',
@@ -481,12 +573,14 @@ async function bootstrap(): Promise<void> {
       case 'copy-obs':
         void copyObsUrl();
         break;
-      case 'toggle-obs-hide':
-        void applySettingsPatch({ obsHidePet: !settings.obsHidePet });
-        if (!settings.obsHidePet) {
+      case 'toggle-obs-hide': {
+        const obsHidePet = !settings.obsHidePet;
+        void applySettingsPatch({ obsHidePet });
+        if (!obsHidePet) {
           closeMenu();
         }
         break;
+      }
       case 'toggle-mcp':
         void applySettingsPatch({ mcpEnabled: !settings.mcpEnabled });
         break;
@@ -525,7 +619,9 @@ async function bootstrap(): Promise<void> {
   });
 
   await listen('kuro-menu-opened', async () => {
+    cancelOpacityPreview();
     try {
+      await settingsOperations;
       const [latestSettings, latestCats] = await Promise.all([
         invoke<AppSettings>('get_settings'),
         invoke<CatSkinConfig[]>('get_cats'),

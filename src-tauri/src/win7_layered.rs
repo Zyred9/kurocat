@@ -37,6 +37,7 @@ struct PendingFrame {
     width: u32,
     height: u32,
     bgra: Vec<u8>,
+    opacity_alpha: u8,
     has_frame: bool,
 }
 
@@ -73,6 +74,7 @@ fn hub() -> &'static Win7LayeredHub {
             width: 0,
             height: 0,
             bgra: Vec::new(),
+            opacity_alpha: u8::MAX,
             has_frame: false,
         }),
         app: Mutex::new(None),
@@ -221,7 +223,7 @@ impl DibPresenter {
         }
     }
 
-    fn present(&mut self, hwnd: HWND, w: u32, h: u32, bgra: &[u8]) -> bool {
+    fn present(&mut self, hwnd: HWND, w: u32, h: u32, bgra: &[u8], opacity_alpha: u8) -> bool {
         let Some(expected) = (w as usize)
             .checked_mul(h as usize)
             .and_then(|px| px.checked_mul(4))
@@ -248,7 +250,7 @@ impl DibPresenter {
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
-                SourceConstantAlpha: 255,
+                SourceConstantAlpha: opacity_alpha,
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
             // Passing pptDst = NULL keeps the current screen position untouched, so frames
@@ -286,14 +288,19 @@ fn present_latest_on_thread(hwnd: HWND) {
     if !h.visible.load(Ordering::Relaxed) {
         return;
     }
-    let (w, h_px, buf) = {
+    let (w, h_px, buf, opacity_alpha) = {
         let guard = h.pending.lock().unwrap();
         if !guard.has_frame || guard.width == 0 || guard.height == 0 || guard.bgra.is_empty() {
             return;
         }
-        (guard.width, guard.height, guard.bgra.clone())
+        (
+            guard.width,
+            guard.height,
+            guard.bgra.clone(),
+            guard.opacity_alpha,
+        )
     };
-    let ok = PRESENTER.with(|cell| cell.borrow_mut().present(hwnd, w, h_px, &buf));
+    let ok = PRESENTER.with(|cell| cell.borrow_mut().present(hwnd, w, h_px, &buf, opacity_alpha));
     if ok {
         let count = h.presented_frames.fetch_add(1, Ordering::Relaxed) + 1;
         // Optional diagnostic frame dump for automated visual verification (only when env var set)
@@ -622,7 +629,11 @@ pub fn init(app: AppHandle, x: i32, y: i32, w: u32, h: u32, always_on_top: bool)
     let _ = ready_rx.recv_timeout(std::time::Duration::from_secs(3));
 }
 
-pub fn submit_rgba_frame(w: u32, h: u32, rgba: &[u8]) {
+fn opacity_to_alpha(opacity: i32) -> u8 {
+    ((crate::config::normalize_opacity(opacity) * i32::from(u8::MAX) + 50) / 100) as u8
+}
+
+pub fn submit_rgba_frame(w: u32, h: u32, rgba: &[u8], opacity: i32) {
     if w == 0 || h == 0 || w > 4096 || h > 4096 {
         return;
     }
@@ -645,6 +656,7 @@ pub fn submit_rgba_frame(w: u32, h: u32, rgba: &[u8]) {
         rgba_to_premultiplied_bgra(rgba, &mut guard.bgra);
         guard.width = w;
         guard.height = h;
+        guard.opacity_alpha = opacity_to_alpha(opacity);
         guard.has_frame = true;
     }
 
@@ -765,6 +777,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn opacity_percent_rounds_to_native_alpha() {
+        assert_eq!(opacity_to_alpha(crate::config::default_opacity()), u8::MAX);
+        assert_eq!(opacity_to_alpha(50), 128);
+        assert_eq!(opacity_to_alpha(0), 51);
+    }
+
+    #[test]
     fn premultiplies_straight_rgba_to_bgra_accurately() {
         let rgba: [u8; 16] = [
             // Fully transparent pixel with dirty RGB -> must become (0,0,0,0)
@@ -831,7 +850,7 @@ mod tests {
 
             let mut presenter = DibPresenter::new();
             assert!(
-                presenter.present(hwnd, w, h, &bgra),
+                presenter.present(hwnd, w, h, &bgra, u8::MAX),
                 "UpdateLayeredWindow(..., ULW_ALPHA) must succeed with 32-bit premultiplied DIBSection"
             );
 
@@ -845,12 +864,13 @@ mod tests {
             assert_ne!(GetWindowRect(hwnd, &mut rc), 0);
             assert_eq!((rc.left, rc.top), (120, 140));
             assert_eq!((rc.right - rc.left, rc.bottom - rc.top), (64, 64));
+            assert!(presenter.present(hwnd, w, h, &bgra, opacity_to_alpha(50)));
 
             // Resize to 96x80 and verify DIB recreation + ULW_ALPHA succeeds cleanly
             let rgba2 = vec![0u8; (96 * 80 * 4) as usize];
             let mut bgra2 = vec![0u8; rgba2.len()];
             rgba_to_premultiplied_bgra(&rgba2, &mut bgra2);
-            assert!(presenter.present(hwnd, 96, 80, &bgra2));
+            assert!(presenter.present(hwnd, 96, 80, &bgra2, u8::MAX));
             assert_ne!(GetWindowRect(hwnd, &mut rc), 0);
             assert_eq!((rc.left, rc.top), (120, 140));
             assert_eq!((rc.right - rc.left, rc.bottom - rc.top), (96, 80));

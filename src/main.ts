@@ -26,6 +26,7 @@ interface AppSettings {
   x: number | null;
   y: number | null;
   scale: number;
+  opacity: number;
   alwaysOnTop: boolean;
   clickThroughLocked: boolean;
   showKeyBubbles: boolean;
@@ -110,6 +111,7 @@ let settings: AppSettings = {
   x: null,
   y: null,
   scale: 1,
+  opacity: 100,
   alwaysOnTop: true,
   clickThroughLocked: false,
   showKeyBubbles: true,
@@ -136,6 +138,12 @@ const menuEl = document.getElementById('context-menu') as HTMLDivElement;
 const breedPillsEl = document.getElementById('breed-pills') as HTMLDivElement;
 const scaleSliderEl = document.getElementById('scale-slider') as HTMLInputElement;
 const scaleValueEl = document.getElementById('scale-value') as HTMLButtonElement;
+const opacitySliderEl = document.getElementById('opacity-slider') as HTMLInputElement;
+const opacityValueEl = document.getElementById('opacity-value') as HTMLButtonElement;
+let sideOpacityPreview: number | null = null;
+let inlineOpacityPreview: number | null = null;
+let pendingOpacitySave: { opacity: number } | null = null;
+let settingsWrites = Promise.resolve();
 const updateToastEl = document.getElementById('update-toast') as HTMLDivElement;
 const updateToastTextEl = document.getElementById('update-toast-text') as HTMLSpanElement;
 const btnToastInstallEl = document.getElementById('btn-toast-install') as HTMLButtonElement;
@@ -289,6 +297,54 @@ function updateScaleSliderVisual(scaleVal: number): void {
   }
 }
 
+function updatePetOpacity(opacity = 100): void {
+  const value = String(opacity / 100);
+  if (canvas.style.opacity !== value) {
+    canvas.style.opacity = value;
+    canvas3d.style.opacity = value;
+  }
+  if (opacitySliderEl) {
+    opacitySliderEl.value = String(opacity);
+    opacitySliderEl.style.setProperty('--pct', `${((opacity - 20) / (100 - 20)) * 100}%`);
+    opacitySliderEl.setAttribute('aria-valuetext', `${opacity}%`);
+  }
+  if (opacityValueEl) {
+    opacityValueEl.textContent = `${opacity}%`;
+  }
+}
+
+function currentPetOpacity(): number {
+  return inlineOpacityPreview ?? pendingOpacitySave?.opacity ?? sideOpacityPreview ?? settings.opacity ?? 100;
+}
+
+function cancelInlineOpacityPreview(): void {
+  if (inlineOpacityPreview === null) return;
+  inlineOpacityPreview = null;
+  updatePetOpacity(currentPetOpacity());
+}
+
+function commitInlineOpacity(opacity: number): void {
+  inlineOpacityPreview = null;
+  sideOpacityPreview = null;
+  const pending = { opacity };
+  pendingOpacitySave = pending;
+  updatePetOpacity(opacity);
+
+  void queueSettingsWrite(async () => {
+    if (opacity !== settings.opacity) {
+      settings = await invoke<AppSettings>('update_settings', { patch: { ...settings, opacity } });
+      syncMenuUI();
+    }
+  }).catch((error) => {
+    console.error('Failed to save pet opacity:', error);
+  }).finally(() => {
+    if (pendingOpacitySave === pending) {
+      pendingOpacitySave = null;
+      updatePetOpacity(currentPetOpacity());
+    }
+  });
+}
+
 function syncMenuUI(): void {
   const setCheck = (id: string, on: boolean) => {
     const el = document.getElementById(id);
@@ -305,6 +361,7 @@ function syncMenuUI(): void {
   if (!sliderDragging) {
     updateScaleSliderVisual(settings.scale);
   }
+  updatePetOpacity(currentPetOpacity());
 
   const kbLayout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
   const kbOrient: KeyboardOrientation = settings.keyboardOrientation === 'viewer' ? 'viewer' : 'cat';
@@ -425,6 +482,7 @@ function syncTailPickerSelection(): void {
 }
 
 function closeContextMenu(): void {
+  cancelInlineOpacityPreview();
   if (!menuEl.classList.contains('hidden')) {
     menuEl.classList.add('hidden');
     syncWindowInteractiveState();
@@ -436,6 +494,7 @@ function closeContextMenu(): void {
 function openContextMenu(clientX: number, clientY: number): void {
   // Always pop the dedicated non-overlapping side menu window beside the cat so it NEVER blocks the pet!
   if (!menuEl.classList.contains('hidden')) {
+    cancelInlineOpacityPreview();
     menuEl.classList.add('hidden');
     syncWindowInteractiveState();
     syncWin7OverlayFn?.(false);
@@ -555,11 +614,19 @@ async function confirmTailPicker(): Promise<void> {
   syncMenuUI();
 }
 
-async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
-  settings = { ...settings, ...patch };
-  syncMenuUI();
-  settings = await invoke<AppSettings>('update_settings', { patch: settings });
-  syncMenuUI();
+function queueSettingsWrite(run: () => Promise<void>): Promise<void> {
+  const write = settingsWrites.then(run);
+  settingsWrites = write.catch(() => {});
+  return write;
+}
+
+function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
+  return queueSettingsWrite(async () => {
+    settings = { ...settings, ...patch };
+    syncMenuUI();
+    settings = await invoke<AppSettings>('update_settings', { patch: settings });
+    syncMenuUI();
+  });
 }
 
 async function copyMcpConfig(): Promise<void> {
@@ -827,8 +894,21 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  if (opacitySliderEl) {
+    opacitySliderEl.addEventListener('input', () => {
+      inlineOpacityPreview = opacitySliderEl.valueAsNumber;
+      updatePetOpacity(inlineOpacityPreview);
+    });
+    opacitySliderEl.addEventListener('change', () => commitInlineOpacity(opacitySliderEl.valueAsNumber));
+    opacitySliderEl.addEventListener('dblclick', () => commitInlineOpacity(100));
+    opacitySliderEl.addEventListener('pointercancel', cancelInlineOpacityPreview);
+    opacitySliderEl.addEventListener('blur', cancelInlineOpacityPreview);
+  }
+  opacityValueEl?.addEventListener('click', () => commitInlineOpacity(100));
+
   await listen<AppSettings>('kuro-settings', (ev) => {
     const prevLock = lastKnownLockState;
+    if (ev.payload.opacity !== settings.opacity) sideOpacityPreview = null;
     settings = ev.payload;
     lastKnownLockState = settings.clickThroughLocked;
     syncMenuUI();
@@ -855,6 +935,13 @@ async function bootstrap(): Promise<void> {
   await listen<number>('kuro-scale-preview', (ev) => {
     if (typeof ev.payload === 'number' && Number.isFinite(ev.payload)) {
       engine.setRenderScale(Math.max(0.2, Math.min(1.5, ev.payload)));
+    }
+  });
+
+  await listen<number>('kuro-opacity-preview', (ev) => {
+    if (Number.isFinite(ev.payload)) {
+      sideOpacityPreview = ev.payload === settings.opacity ? null : ev.payload;
+      updatePetOpacity(currentPetOpacity());
     }
   });
 
@@ -1255,7 +1342,8 @@ async function bootstrap(): Promise<void> {
         for (let i = 0; i < u32.length; i++) {
           hash = Math.imul(hash ^ u32[i], 16777619) >>> 0;
         }
-        const key = `${w}x${h}:${hash}`;
+        const opacity = currentPetOpacity();
+        const key = `${w}x${h}:${hash}:${opacity}`;
         if (key === lastFrameKey) return;
 
         lastFrameKey = key;
@@ -1267,7 +1355,7 @@ async function bootstrap(): Promise<void> {
           imgData.data.byteLength,
         );
         void invoke('win7_present_frame', payload, {
-          headers: { 'x-w': String(w), 'x-h': String(h) },
+          headers: { 'x-w': String(w), 'x-h': String(h), 'x-opacity': String(opacity) },
         }).finally(() => {
           frameBusy = false;
         });

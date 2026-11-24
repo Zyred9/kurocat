@@ -318,6 +318,7 @@ fn get_mcp_config(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSettings) -> AppSettings {
     patch.scale = patch.scale.clamp(0.20, 1.50);
+    patch.opacity = config::normalize_opacity(patch.opacity);
     let clean_breed = sanitize_cat_id(&patch.cat_breed);
     patch.cat_breed = if cat_exists(&clean_breed) {
         clean_breed
@@ -663,6 +664,11 @@ fn open_tail_picker_from_menu(app: AppHandle) {
 fn preview_scale(app: AppHandle, scale: f64) {
     let clamped = scale.clamp(0.20, 1.50);
     let _ = app.emit("kuro-scale-preview", clamped);
+}
+
+#[tauri::command]
+fn preview_opacity(app: AppHandle, opacity: i32) {
+    let _ = app.emit("kuro-opacity-preview", config::normalize_opacity(opacity));
 }
 
 #[tauri::command]
@@ -2019,7 +2025,13 @@ fn win7_present_frame(request: tauri::ipc::Request<'_>) {
             return;
         }
         if let tauri::ipc::InvokeBody::Raw(bytes) = request.body() {
-            win7_layered::submit_rgba_frame(w, h, bytes);
+            let opacity = request
+                .headers()
+                .get("x-opacity")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<i32>().ok())
+                .unwrap_or_else(config::default_opacity);
+            win7_layered::submit_rgba_frame(w, h, bytes, opacity);
         }
     }
     #[cfg(not(windows))]
@@ -2399,6 +2411,7 @@ pub fn run() {
             close_context_menu,
             open_tail_picker_from_menu,
             preview_scale,
+            preview_opacity,
             set_menu_open,
             set_tail_picker_bounds,
             save_tail_picker_selection,

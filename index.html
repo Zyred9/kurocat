@@ -157,6 +157,28 @@
           </div>
         </div>
       </div>
+      <div class="menu-scale-row">
+        <div class="scale-header">
+          <label class="menu-scale-label" for="opacity-slider">桌宠不透明度</label>
+          <button class="scale-value-btn" id="opacity-value" type="button" title="点击复位 100%" aria-label="恢复桌宠不透明度至 100%">100%</button>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="opacity-slider"
+            class="scale-slider"
+            min="20"
+            max="100"
+            step="1"
+            value="100"
+            aria-valuetext="100%"
+          />
+          <div class="scale-ticks">
+            <span>20%</span>
+            <span>100%</span>
+          </div>
+        </div>
+      </div>
       <div class="menu-sep"></div>
       <button class="menu-item" data-action="desktop-shortcut" id="btn-desktop-shortcut">
         <span>创建桌面图标</span>
