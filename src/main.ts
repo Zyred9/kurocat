@@ -259,7 +259,8 @@ engine.onAfterRender = () => {
 };
 
 function renderDailyKeyCount3d(): void {
-  if (!engine3d || !dailyKeyCountCtx3d || !canDrawDailyKeyCount()) {
+  const anchor = canDrawDailyKeyCount() ? engine3d?.getDailyKeyCountAnchor() : null;
+  if (!anchor || !dailyKeyCountCtx3d) {
     if (!dailyKeyCountCanvas3d.hidden) dailyKeyCountCanvas3d.hidden = true;
     return;
   }
@@ -271,7 +272,7 @@ function renderDailyKeyCount3d(): void {
   if (dailyKeyCountCanvas3d.width !== pixelWidth) dailyKeyCountCanvas3d.width = pixelWidth;
   if (dailyKeyCountCanvas3d.height !== pixelHeight) dailyKeyCountCanvas3d.height = pixelHeight;
   dailyKeyCountCtx3d.clearRect(0, 0, pixelWidth, pixelHeight);
-  drawDailyKeyCount(dailyKeyCountCtx3d, width, height, engine3d.getDailyKeyCountAnchor());
+  drawDailyKeyCount(dailyKeyCountCtx3d, width, height, anchor);
   if (dailyKeyCountCanvas3d.hidden) dailyKeyCountCanvas3d.hidden = false;
 }
 

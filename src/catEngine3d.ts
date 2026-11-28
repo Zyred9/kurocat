@@ -2898,7 +2898,8 @@ export class KuroCatEngine3D {
     return zone;
   }
 
-  public getDailyKeyCountAnchor(): { x: number; y: number } {
+  public getDailyKeyCountAnchor(): { x: number; y: number } | null {
+    if (this.asleep) return null;
     const p = this.keyCountAnchor.set(0, 0.71, -0.015)
       .applyMatrix4(this.headMount.matrixWorld)
       .project(this.camera);

@@ -699,6 +699,7 @@ export class KuroCatEngine {
       const top = this.dafeiyu.getHeadTopPoint(performance.now(), this.buildDaFeiYuLayout());
       return this.logicalToCssPoint(top.x, top.y - 9);
     }
+    if (this.asleep) return null;
     const { head } = this.getCatHitZonesLogical();
     const headsetClearance = this.headphonesOn ? 9 : 0;
     return this.logicalToCssPoint(head.x, head.y - head.ry - 18 - headsetClearance);
